@@ -3,26 +3,24 @@ import time
 
 from flamme_rouge.catalog import (
     GROUP_MINE,
+    GROUP_BASE,
     GROUP_OFFICIAL,
-    GROUP_READY,
     MAX_SAVED_FILES,
     build_choices,
     saved_files,
 )
 from flamme_rouge.tiles import example_plan, make_tile, plan_to_json
-from flamme_rouge.track import Track
 
 
 def write(path, tiles):
     path.write_text(plan_to_json(tiles), encoding="utf-8")
 
 
-def test_ready_to_play_choices(tmp_path):
+def test_menu_lists_official_stages_first_then_base_circuits(tmp_path):
     choices = build_choices(str(tmp_path))
-    demo, example = choices[0], choices[1]
-    assert demo.group == example.group == GROUP_READY
-    assert demo.playable and len(demo.track) == len(Track())
-    assert example.playable and example.tiles and example.details.endswith("14 tuiles")
+    groups = [c.group for c in choices]
+    assert groups == [GROUP_OFFICIAL] * 5 + [GROUP_BASE] * 4  # plus de parcours « prêts à jouer » non officiels
+    assert choices[0].key == "officiel:Avenue Corso Paseo"
 
 
 def test_official_stages_are_listed_and_playable(tmp_path):

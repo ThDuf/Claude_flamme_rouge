@@ -115,3 +115,18 @@ def test_curve_squares_turn_the_road_by_their_angle():
     assert lb[0] - rb[0] == pytest.approx(-ROAD_WIDTH) and lb[1] - rb[1] == pytest.approx(0, abs=1e-9)
     # côté intérieur du virage plus court que l'extérieur (cases en éventail)
     assert dist(squares[0].lb, squares[0].lf) < dist(squares[0].rb, squares[0].rf)
+
+
+def test_curve_edges_follow_an_arc():
+    squares = layout_squares(Track("." * 4, [45, 45, 0, 0]), extra=0)
+    curve, straight = squares[0], squares[2]
+    assert straight.left_path == (straight.lb, straight.lf)  # ligne droite : bords droits
+    assert len(curve.left_edge) > 2 and len(curve.right_edge) == len(curve.left_edge)
+    for path, a, b in ((curve.left_edge, curve.lb, curve.lf), (curve.right_edge, curve.rb, curve.rf)):
+        assert dist(path[0], a) < 1e-9 and dist(path[-1], b) < 1e-9  # l'arc relie bien les coins
+    # les points du bord extérieur restent à la même distance du centre du virage
+    R = 1 / math.radians(45)
+    center = (0.0, R)  # virage à gauche depuis (0, 0) vers l'est
+    radii = [dist(p, center) for p in curve.right_edge]
+    assert max(radii) - min(radii) < 1e-9 and radii[0] == pytest.approx(R + ROAD_WIDTH / 2)
+    assert len(curve.outline) == 2 * len(curve.left_edge)

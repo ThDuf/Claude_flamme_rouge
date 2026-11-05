@@ -6,7 +6,7 @@ import ui
 from flamme_rouge import palette as pal
 from flamme_rouge.boardview import profile_primitives, track_preview_primitives
 from flamme_rouge.extensions import EXTENSIONS, READY
-from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, GROUP_READY, Choice, build_choices
+from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, Choice, build_choices
 from flamme_rouge.paths import PARCOURS_DIR, ensure_parcours_dir
 from flamme_rouge.tiles import KIND_FINISH, KIND_START, make_tile
 
@@ -14,6 +14,7 @@ PREVIEW_W, PREVIEW_H = 700, 340
 PROFILE_H = 130
 LIST_W = 360
 WINDOW_W, WINDOW_H = 1180, 820
+DEFAULT_CHOICE = "officiel:Avenue Corso Paseo"  # l'étape conseillée pour une première partie
 TEAM_CHOICES = [(2, "2 équipes"), (3, "3 équipes"), (4, "4 équipes")]
 GROUP_HINTS = {
     GROUP_BASE: "21 tuiles comme dans la boîte (même composition que les cartes étape, sans en être la copie).",
@@ -71,7 +72,7 @@ class MenuScreen:
         self.extra_files: list[str] = []
         self.choices: list[Choice] = []
         self.rows: dict[str, ChoiceRow] = {}
-        self.choice_var = tk.StringVar(value="demo")
+        self.choice_var = tk.StringVar(value=DEFAULT_CHOICE)
         self.teams_var = tk.IntVar(value=2)
         self.secret_var = tk.BooleanVar(value=False)
         self.animate_var = tk.BooleanVar(value=True)
@@ -171,8 +172,8 @@ class MenuScreen:
         self.rows = {}
         keys = {c.key for c in self.choices if c.playable}
         if selected not in keys:
-            selected = "demo"
-            self.choice_var.set("demo")
+            selected = DEFAULT_CHOICE if DEFAULT_CHOICE in keys else next(iter(sorted(keys)), "")
+            self.choice_var.set(selected)
         group = None
         for choice in self.choices:
             if choice.group != group:

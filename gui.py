@@ -21,7 +21,7 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
-from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, map_window, terrain_text
+from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, map_window, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
     CHOOSE,
@@ -402,6 +402,10 @@ class App:
         t = time.monotonic() - self.fx_start if self.animate_var.get() is True else 0.0
         self.profile.delete("fx")
         ui.paint(self.profile, weather_fx_primitives(self.game.track, self.game.weather, BOARD_W, PROFILE_H, t), tags=("fx",))
+        zoom = self.zoom_var.get() is True
+        self.board.delete("fx")
+        ui.paint(self.board, map_weather_fx_primitives(self.game, t, zoom=zoom, window=self.anim_window if zoom else None,
+                                                       view=self.view), tags=("fx",))
         if self.fx_job is None and self.animate_var.get() is True:
             self.fx_job = self.root.after(self.WEATHER_FX_MS, self._fx_tick)
 

@@ -9,10 +9,9 @@ from typing import Iterable, Optional, Sequence
 from .circuits import base_circuits
 from .official import official_stages
 from .paths import PARCOURS_DIR
-from .tiles import ERROR, Tile, example_plan, plan_from_json, plan_to_track, validate
+from .tiles import ERROR, Tile, plan_from_json, plan_to_track, validate
 from .track import Track
 
-GROUP_READY = "Prêts à jouer"
 GROUP_BASE = "Circuits de base"
 GROUP_OFFICIAL = "Parcours officiels"
 GROUP_MINE = "Mes parcours"
@@ -69,19 +68,16 @@ def build_choices(
     parcours_dir: str = PARCOURS_DIR,
     extra_files: Iterable[str] = (),
 ) -> list[Choice]:
-    choices = [
-        Choice("demo", "Circuit de démonstration (50 cases)", GROUP_READY, Track()),
-        choice_from_tiles("exemple", f"Parcours d'exemple en tuiles ({len(example_plan())} tuiles)", GROUP_READY, example_plan()),
-    ]
-    for name, description, tiles in base_circuits():
-        base = choice_from_tiles(f"base:{name}", name, GROUP_BASE, tiles)
-        choices.append(base)
+    """Les parcours du menu : les étapes officielles d'abord, puis les circuits de base et les parcours enregistrés."""
+    choices: list[Choice] = []
     for stage in official_stages():
         if stage.available:
             choices.append(choice_from_tiles(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, stage.tiles))
         else:
             problem = f"Tuiles inconnues : {', '.join(stage.missing)}."
             choices.append(Choice(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, problem=problem))
+    for name, description, tiles in base_circuits():
+        choices.append(choice_from_tiles(f"base:{name}", name, GROUP_BASE, tiles))
 
     paths = saved_files(parcours_dir)[:MAX_SAVED_FILES]
     for path in extra_files:

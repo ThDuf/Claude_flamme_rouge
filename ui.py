@@ -297,6 +297,9 @@ def paint(canvas, shapes, tags=()) -> None:
         elif kind == "poly":
             _, points, fill, outline, width = shape
             canvas.create_polygon(points, fill=fill, outline=outline, width=width, tags=tags)
+        elif kind == "path":  # ligne brisée : bords de route qui suivent les virages
+            _, points, color, width = shape
+            canvas.create_line(*points, fill=color, width=width, capstyle="round", joinstyle="round", tags=tags)
         elif kind == "line":
             _, x0, y0, x1, y1, color, width = shape
             canvas.create_line(x0, y0, x1, y1, fill=color, width=width, capstyle="round", tags=tags)

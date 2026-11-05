@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .track import Track
 
 ROAD_WIDTH = 1.4  # largeur de la route (2 couloirs), pour une case de longueur 1
+ARC_STEP_DEGREES = 5  # finesse du dessin des virages : un point tous les 5° le long des bords
 EXTRA_SQUARES = 14  # cases dessinées après la ligne d'arrivée (un coureur peut la dépasser)
 
 Point = tuple[float, float]
@@ -32,10 +33,32 @@ class SquareGeom:
     rb: Point  # arrière droit
     rf: Point  # avant droit
     lf: Point  # avant gauche
+    # Bords de la route de l'arrière vers l'avant, en arc dans un virage (pour un dessin lisse).
+    # Vides : bords droits, de lb à lf et de rb à rf.
+    left_edge: tuple[Point, ...] = ()
+    right_edge: tuple[Point, ...] = ()
 
     @property
     def corners(self) -> list[Point]:
         return [self.lb, self.rb, self.rf, self.lf]
+
+    @property
+    def left_path(self) -> tuple[Point, ...]:
+        return self.left_edge or (self.lb, self.lf)
+
+    @property
+    def right_path(self) -> tuple[Point, ...]:
+        return self.right_edge or (self.rb, self.rf)
+
+    @property
+    def middle_path(self) -> tuple[Point, ...]:
+        """Ligne entre les deux couloirs."""
+        return tuple(_mid(a, b) for a, b in zip(self.left_path, self.right_path))
+
+    @property
+    def outline(self) -> list[Point]:
+        """Contour à dessiner : comme `corners`, mais les bords suivent l'arc du virage."""
+        return [*self.right_path, *reversed(self.left_path)]
 
     @property
     def center(self) -> Point:
@@ -68,20 +91,35 @@ def layout_squares(track: Track, extra: int = EXTRA_SQUARES) -> list[SquareGeom]
         return left, right
 
     edges.append(edge())
+    arcs: list[tuple[tuple[Point, ...], tuple[Point, ...]]] = []
     for i in range(total):
         turn = math.radians(track.angle(i))
         if abs(turn) < 1e-9:
             x += math.cos(heading)
             y += math.sin(heading)
-        else:  # arc de longueur 1 : on avance selon la corde
+            arcs.append(((), ()))
+        else:  # arc de longueur 1 : on avance selon la corde, et on échantillonne les bords le long de l'arc
+            x0, y0, h0 = x, y, heading
+            steps = max(2, math.ceil(abs(math.degrees(turn)) / ARC_STEP_DEGREES))
+            left, right = [], []
+            for k in range(steps + 1):
+                f = k / steps
+                h = h0 + turn * f
+                # point de la ligne médiane après une longueur f d'arc (rayon 1 / turn)
+                px = x0 + (math.sin(h) - math.sin(h0)) / turn
+                py = y0 - (math.cos(h) - math.cos(h0)) / turn
+                left.append((px - half * math.sin(h), py + half * math.cos(h)))
+                right.append((px + half * math.sin(h), py - half * math.cos(h)))
             chord = 2 * math.sin(turn / 2) / turn
             x += chord * math.cos(heading + turn / 2)
             y += chord * math.sin(heading + turn / 2)
+            arcs.append((tuple(left), tuple(right)))
         heading += turn
         edges.append(edge())
 
     return [
-        SquareGeom(lb=edges[i][0], rb=edges[i][1], rf=edges[i + 1][1], lf=edges[i + 1][0])
+        SquareGeom(lb=edges[i][0], rb=edges[i][1], rf=edges[i + 1][1], lf=edges[i + 1][0],
+                   left_edge=arcs[i][0], right_edge=arcs[i][1])
         for i in range(total)
     ]
 
