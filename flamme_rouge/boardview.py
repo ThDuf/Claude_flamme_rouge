@@ -5,6 +5,7 @@ ce qui permet de les tester sans écran. Formats des formes :
   ("rect", x0, y0, x1, y1, remplissage, contour, épaisseur)
   ("oval", x0, y0, x1, y1, remplissage, contour, épaisseur)
   ("line", x0, y0, x1, y1, couleur, épaisseur)
+  ("path", [x0, y0, x1, y1, ...], couleur, épaisseur)   ligne brisée (bords de route en virage)
   ("text", x, y, texte, couleur, taille, gras, ancrage)
 """
 from __future__ import annotations
@@ -194,6 +195,115 @@ def pan_view(view: tuple[float, float, float], dx: float, dy: float) -> tuple[fl
     return scale, cx - dx / scale, cy + dy / scale
 
 
+def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
+    """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels)."""
+    squares = layout_squares(game.track)
+    first, last = window or (map_window(game) if zoom else full_window(game))
+    if view is None:
+        scale, mx, my = map_transform(game, zoom, window, width, height)
+    else:
+        scale, mx, my = view
+        first, last = 0, min(len(squares) - 1, max(full_window(game)[1], max(r.position for r in game.riders)))
+
+    def tr(p) -> tuple[float, float]:
+        return (width / 2 + (p[0] - mx) * scale, height / 2 - (p[1] - my) * scale)
+
+    return squares, first, last, scale, tr
+
+
+def _mix(c1: str, c2: str, f: float) -> str:
+    """Couleur entre c1 (f = 0) et c2 (f = 1) : sert à simuler la transparence et la profondeur."""
+    f = max(0.0, min(1.0, f))
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * f):02x}" for x, y in zip(a, b))
+
+
+def _frac(x: float) -> float:
+    return x - math.floor(x)
+
+
+def map_weather_fx_primitives(
+    game: Game,
+    t: float,
+    zoom: bool = False,
+    window: Optional[tuple[int, int]] = None,
+    width: int = BOARD_W,
+    height: int = MAP_H,
+    view: Optional[tuple[float, float, float]] = None,
+) -> list[tuple]:
+    """Animation de la météo sur la carte, à l'instant `t` (en secondes), dans le même cadrage que map_primitives.
+
+    Pluie : gouttes qui tombent et ronds dans l'eau. Vent arrière / de face : traits qui filent le long de la route,
+    vers l'arrivée ou vers le départ. Vent de travers : rafales qui traversent la route sur trois plans (les plus
+    proches plus grandes, plus vives et plus rapides) pour donner de la profondeur. Beau temps : un petit soleil."""
+    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view)
+    px = max(scale, 6.0)  # pixels par case, pour dimensionner les effets
+    prims: list[tuple] = []
+
+    def at(progress: float, lane: float) -> tuple[float, float]:
+        return tr(point_on_road(squares, progress, lane))
+
+    for k, zone in enumerate(game.weather.zones):
+        start, end = max(zone.start, first), min(zone.end, last + 1, len(squares))
+        if start >= end:
+            continue
+        length = end - start
+        seed = _frac(k * 0.37)
+        if zone.effect == RAIN:
+            for d in range(4 * length):
+                phase = _frac(d * 0.618 + seed)
+                p = start + _frac(d * 0.381 + seed * 3.1) * length
+                lane = -0.4 + _frac(d * 0.727 + seed) * 1.8
+                x, y = at(p, lane)
+                f = _frac(t * 0.9 + phase)
+                if f < 0.35:  # la goutte tombe (vue de dessus, en biais vers le bas de l'écran)
+                    g = f / 0.35
+                    drop = 0.5 * px * (1 - g)
+                    prims.append(("line", x - drop * 0.3, y - drop - 3, x - drop * 0.3 + 2, y - drop + 3, FX_RAIN, 1))
+                else:  # rond dans l'eau qui s'agrandit et s'efface
+                    g = (f - 0.35) / 0.65
+                    r = 1.5 + g * 0.22 * px
+                    color = _mix(FX_RAIN, pal.TERRAIN_FILL["."], g)
+                    prims.append(("oval", x - r, y - r * 0.6, x + r, y + r * 0.6, "", color, 1))
+        elif zone.effect in (TAILWIND, HEADWIND):
+            direction = 1 if zone.effect == TAILWIND else -1
+            color = FX_WIND[zone.effect]
+            for d in range(3 * length):
+                phase = _frac(d * 0.29 + seed)
+                lane = -0.6 + _frac(d * 0.53 + seed) * 2.2
+                f = _frac(t * 0.45 + phase)
+                head = start + (f if direction > 0 else 1 - f) * length
+                tail = head - 0.7 * direction
+                if not start <= tail <= end:
+                    continue
+                (x0, y0), (x1, y1) = at(tail, lane), at(head, lane)
+                prims.append(("line", x0, y0, x1, y1, _mix(pal.GRASS, color, 0.5 + 0.5 * math.sin(f * math.pi)), 2))
+        elif zone.effect == CROSSWIND:
+            color = FX_WIND[CROSSWIND]
+            for depth in (0.35, 0.65, 1.0):  # trois plans : du plus loin au plus proche
+                for d in range(max(2, int(length * 1.5))):
+                    phase = _frac(d * 0.41 + depth * 0.77 + seed)
+                    p = start + (d + 0.5) / max(2, int(length * 1.5)) * length
+                    f = _frac(t * (0.25 + 0.45 * depth) + phase)
+                    lane = 2.6 - f * 4.0  # de la gauche de la route vers la droite
+                    streak = 0.35 + 0.6 * depth
+                    (x0, y0), (x1, y1) = at(p, lane + streak), at(p, lane)
+                    lift = (1 - depth) * 0.18 * px  # les plans lointains un peu plus haut : effet de perspective
+                    fade = math.sin(f * math.pi)
+                    prims.append(("line", x0, y0 - lift, x1, y1 - lift, _mix(pal.GRASS, color, (0.3 + 0.7 * depth) * fade),
+                                  1 if depth < 0.5 else 2 if depth < 0.9 else 3))
+        elif zone.effect == SUNNY:
+            cx, cy = at(start + length / 2, 2.8)
+            r = max(4.0, min(9.0, 0.22 * px))
+            prims.append(("oval", cx - r, cy - r, cx + r, cy + r, FX_SUN, FX_SUN, 1))
+            for ray in range(8):
+                a = t * 0.8 + ray * math.pi / 4
+                prims.append(("line", cx + math.cos(a) * (r + 2), cy + math.sin(a) * (r + 2),
+                              cx + math.cos(a) * (r + 2 + r * 0.7), cy + math.sin(a) * (r + 2 + r * 0.7), FX_SUN, 2))
+    return prims
+
+
 def map_primitives(
     game: Game,
     current: Optional[Rider] = None,
@@ -213,16 +323,7 @@ def map_primitives(
     """
     track = game.track
     finish = len(track)
-    squares = layout_squares(track)
-    first, last = window or (map_window(game) if zoom else full_window(game))
-    if view is None:
-        scale, mx, my = map_transform(game, zoom, window, width, height)
-    else:
-        scale, mx, my = view
-        first, last = 0, min(len(squares) - 1, max(full_window(game)[1], max(r.position for r in game.riders)))
-
-    def tr(p) -> tuple[float, float]:
-        return (width / 2 + (p[0] - mx) * scale, height / 2 - (p[1] - my) * scale)
+    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view)
 
     def flat(points) -> list[float]:
         return [c for p in points for c in tr(p)]
@@ -239,16 +340,12 @@ def map_primitives(
         beyond = s >= finish
         kind = None if beyond else track.kind(s)
         fill = BEYOND_FILL if beyond else TERRAIN_FILL[kind]
-        prims.append(("poly", flat(sq.corners), fill, pal.ROAD_OUTLINE, 1))
-        # lignes blanches sur les bords de la route
-        for a, b in ((sq.lb, sq.lf), (sq.rb, sq.rf)):
-            (ex0, ey0), (ex1, ey1) = tr(a), tr(b)
-            prims.append(("line", ex0, ey0, ex1, ey1, pal.ROAD_EDGE, 2 if scale >= 12 else 1))
+        prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
+        # lignes blanches sur les bords de la route (en arc dans les virages)
+        for path in (sq.left_path, sq.right_path):
+            prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
         # trait séparant les deux couloirs
-        mb = ((sq.lb[0] + sq.rb[0]) / 2, (sq.lb[1] + sq.rb[1]) / 2)
-        mf = ((sq.lf[0] + sq.rf[0]) / 2, (sq.lf[1] + sq.rf[1]) / 2)
-        (x0, y0), (x1, y1) = tr(mb), tr(mf)
-        prims.append(("line", x0, y0, x1, y1, pal.LANE_LINE, 1))
+        prims.append(("path", flat(sq.middle_path), pal.LANE_LINE, 1))
         cx, cy = tr(sq.center)
         if kind is not None and kind != NORMAL and scale >= 9:
             prims.append(("text", cx, cy, TERRAIN_SYMBOL[kind], TERRAIN_SYMBOL_COLOR[kind], 13 if scale >= 15 else 9, True, "center"))
@@ -365,10 +462,9 @@ def _preview(
         beyond = finish_square is not None and s >= finish_square
         kind = track.kind(s)
         fill = BEYOND_FILL if beyond else TERRAIN_FILL[kind]
-        prims.append(("poly", flat(sq.corners), fill, pal.ROAD_OUTLINE, 1))
-        for a, b in ((sq.lb, sq.lf), (sq.rb, sq.rf)):
-            (ex0, ey0), (ex1, ey1) = tr(a), tr(b)
-            prims.append(("line", ex0, ey0, ex1, ey1, pal.ROAD_EDGE, 2 if scale >= 12 else 1))
+        prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
+        for path in (sq.left_path, sq.right_path):
+            prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
         if kind != NORMAL and not beyond and scale >= 12 and s not in under_badges:
             cx, cy = tr(sq.center)
             prims.append(("text", cx, cy, TERRAIN_SYMBOL[kind], TERRAIN_SYMBOL_COLOR[kind], 11, True, "center"))
@@ -376,7 +472,7 @@ def _preview(
     if ranges:
         if selected is not None and 0 <= selected < len(ranges):
             for s in ranges[selected]:
-                prims.append(("poly", flat(squares[s].corners), "", SELECTED_COLOR, 3))
+                prims.append(("poly", flat(squares[s].outline), "", SELECTED_COLOR, 3))
         # numéro de chaque tuile, dans une pastille posée au milieu de la tuile
         for i, (sa, sb) in enumerate(badge_pairs):
             (ax, ay), (bx, by) = tr(squares[sa].center), tr(squares[sb].center)
@@ -616,11 +712,15 @@ def weather_fx_primitives(track: Track, weather: Weather, width: int, height: in
                     tail = x - 10 * direction
                     prims.append(("line", max(min(tail, x1), x0), level, max(min(x, x1), x0), level, FX_WIND[zone.effect], 2))
                     prims.append(("line", x, level, x - 3 * direction, level - 2, FX_WIND[zone.effect], 1))
-                else:  # vent de travers : de petites rafales qui traversent de haut en bas
-                    x = x0 + (d + 0.5) * w / 4
-                    f = (t * 0.9 + phase) % 1.0
-                    y = top + f * max(ground - top - 6, 1)
-                    prims.append(("line", x - 4, y, x + 4, y + 3, FX_WIND[zone.effect], 2))
+                else:  # vent de travers : des rafales qui viennent vers nous (elles grossissent et s'éclairent)
+                    for g in range(2):
+                        f = _frac(t * 0.55 + phase + g * 0.5)
+                        cx = x0 + _frac(d * 0.31 + g * 0.47 + seed) * w
+                        cy = ground - 10 - _frac(d * 0.59 + g * 0.23) * 22 + f * 8
+                        size = 2 + 10 * f
+                        color = _mix(pal.CARD, FX_WIND[zone.effect], math.sin(f * math.pi))
+                        prims.append(("line", cx - size, cy - size * 0.25, cx + size, cy + size * 0.25, color,
+                                      1 if f < 0.4 else 2 if f < 0.75 else 3))
         elif zone.effect == SUNNY:  # petit soleil dont les rayons tournent
             cx = (x0 + x1) / 2
             cy = min(y_at(s + 0.5) for s in range(zone.start, min(zone.end, n))) - 16
@@ -750,7 +850,7 @@ def tile_card_primitives(tile: Tile, width: int, height: int, selected: bool = F
     for s, sq in enumerate(squares):
         beyond = fin is not None and s >= fin
         fill = BEYOND_FILL if beyond else TERRAIN_FILL[track.kind(s)]
-        prims.append(("poly", [c for p in sq.corners for c in tr(p)], fill, pal.ROAD_OUTLINE, 1))
+        prims.append(("poly", [c for p in sq.outline for c in tr(p)], fill, pal.ROAD_OUTLINE, 1))
     if track.start:
         _start_line(prims, squares, track.start, tr)
     if fin is not None and fin < len(squares):

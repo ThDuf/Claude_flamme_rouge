@@ -203,3 +203,30 @@ def test_weather_animation_on_the_profile():
     assert head_x(c, FX_WIND[TAILWIND]) > head_x(a, FX_WIND[TAILWIND])
     assert head_x(c, FX_WIND[HEADWIND]) < head_x(a, FX_WIND[HEADWIND])
     assert weather_fx_primitives(track, Weather(), 1000, 100, 0.0) == []
+
+
+def test_weather_animation_on_the_map():
+    from flamme_rouge.boardview import FX_RAIN, FX_SUN, map_weather_fx_primitives
+
+    zones = [WeatherZone(6, 12, RAIN), WeatherZone(18, 24, TAILWIND), WeatherZone(26, 32, HEADWIND),
+             WeatherZone(42, 48, CROSSWIND), WeatherZone(54, 60, SUNNY)]
+    g = Game(plan_to_track(official_stages()[0].tiles), num_teams=2, seed=0, weather=zones)
+    a, b = map_weather_fx_primitives(g, 0.0), map_weather_fx_primitives(g, 0.3)
+    assert a and a != b  # ça bouge
+    colors = {p[5] for p in a if p[0] in ("line", "oval")} | {p[6] for p in a if p[0] == "oval"}
+    assert FX_RAIN in colors and FX_SUN in colors
+    widths = {p[6] for p in a + b if p[0] == "line"}
+    assert {1, 2, 3} <= widths  # vent de travers sur trois plans de profondeur
+    # en zoom sur le départ, les zones hors du cadre ne sont pas animées
+    for r in g.riders:
+        r.position = 0
+    zoomed = map_weather_fx_primitives(g, 0.0, zoom=True)
+    assert len(zoomed) < len(a)
+    assert map_weather_fx_primitives(Game(seed=0), 0.0) == []
+
+
+def test_mix_colors():
+    from flamme_rouge.boardview import _mix
+
+    assert _mix("#000000", "#ffffff", 0) == "#000000" and _mix("#000000", "#ffffff", 1) == "#ffffff"
+    assert _mix("#000000", "#ffffff", 0.5) == "#808080" and _mix("#000000", "#ffffff", 2) == "#ffffff"
