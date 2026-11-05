@@ -16,7 +16,7 @@ from typing import Iterable, Optional, Sequence
 from .game import Game
 from .geometry import EXTRA_SQUARES, finish_edge, layout_squares, point_on_road
 from .rider import Rider
-from .tiles import KIND_START, SQUARES_PER_TILE, Tile, finish_index, full_track, tile_ranges
+from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
 from .track import ASCENT, DESCENT, NORMAL, Track
 
 from . import palette as pal
@@ -149,6 +149,13 @@ def _checkered_line(prims: list, squares, finish: int, tr) -> None:
             prims.append(("poly", [k for p in corners for k in tr(p)], color, color, 1))
 
 
+def _start_line(prims: list, squares, start: int, tr) -> None:
+    """Ligne de départ : un trait blanc sur le bord arrière de la première case de course."""
+    sq = squares[start]
+    (x0, y0), (x1, y1) = tr(sq.lb), tr(sq.rb)
+    prims.append(("line", x0, y0, x1, y1, "#ffffff", 4))
+
+
 MIN_SCALE = 3.0
 MAX_SCALE = 140.0
 
@@ -250,6 +257,8 @@ def map_primitives(
             norm = max((ox * ox + oy * oy) ** 0.5, 1e-6)
             prims.append(("text", rx + ox / norm * 11, ry + oy / norm * 11, str(s), pal.SQUARE_NUMBER, 8, False, "center"))
 
+    if track.start and first <= track.start <= last:
+        _start_line(prims, squares, track.start, tr)
     if first <= finish <= last + 1:
         _checkered_line(prims, squares, finish, tr)
         lb, rb = finish_edge(squares, track)
@@ -289,8 +298,9 @@ def _preview(
 ) -> list[tuple]:
     """Dessin d'un parcours entier. `ranges` (cases de chaque tuile) ajoute les pastilles numérotées."""
     squares = layout_squares(track, extra=0)
-    per_tile = len(ranges[0]) if ranges else 0
-    middle = per_tile // 2  # les deux cases du milieu d'une tuile portent sa pastille numérotée
+    # les deux cases du milieu d'une tuile portent sa pastille numérotée
+    badge_pairs = [(r[len(r) // 2 - 1], r[len(r) // 2]) for r in ranges or () if len(r) >= 2]
+    under_badges = {s for pair in badge_pairs for s in pair}
 
     pts = [p for sq in squares for p in sq.corners]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
@@ -317,8 +327,7 @@ def _preview(
         for a, b in ((sq.lb, sq.lf), (sq.rb, sq.rf)):
             (ex0, ey0), (ex1, ey1) = tr(a), tr(b)
             prims.append(("line", ex0, ey0, ex1, ey1, pal.ROAD_EDGE, 2 if scale >= 12 else 1))
-        under_badge = bool(ranges) and s % per_tile in (middle - 1, middle)
-        if kind != NORMAL and not beyond and scale >= 12 and not under_badge:
+        if kind != NORMAL and not beyond and scale >= 12 and s not in under_badges:
             cx, cy = tr(sq.center)
             prims.append(("text", cx, cy, TERRAIN_SYMBOL[kind], TERRAIN_SYMBOL_COLOR[kind], 11, True, "center"))
 
@@ -327,8 +336,8 @@ def _preview(
             for s in ranges[selected]:
                 prims.append(("poly", flat(squares[s].corners), "", SELECTED_COLOR, 3))
         # numéro de chaque tuile, dans une pastille posée au milieu de la tuile
-        for i, rng in enumerate(ranges):
-            (ax, ay), (bx, by) = tr(squares[rng[middle - 1]].center), tr(squares[rng[middle]].center)
+        for i, (sa, sb) in enumerate(badge_pairs):
+            (ax, ay), (bx, by) = tr(squares[sa].center), tr(squares[sb].center)
             cx, cy = (ax + bx) / 2, (ay + by) / 2
             chosen = i == selected
             prims.append(("oval", cx - 10, cy - 10, cx + 10, cy + 10, SELECTED_COLOR if chosen else "#0f172a", "#ffffff", 2))
@@ -346,7 +355,9 @@ def _preview(
         prims.append(("text", x, y, text, "#ffffff", 10, True, "center"))
 
     if start_label:
-        label_near_edge(0, "DÉPART")
+        if track.start:
+            _start_line(prims, squares, track.start, tr)
+        label_near_edge(track.start, "DÉPART")
     if finish_square is not None:
         _checkered_line(prims, squares, finish_square, tr)
         label_near_edge(finish_square, "ARRIVÉE")
@@ -357,14 +368,13 @@ def plan_preview_primitives(tiles: Sequence[Tile], width: int, height: int, sele
     """Le parcours en tuiles, vu de dessus, pour l'éditeur : tuiles numérotées, tuile sélectionnée entourée."""
     if not tiles:
         return [("text", width / 2, height / 2, "Ajoute des tuiles pour voir le parcours", pal.MUTED, 13, False, "center")]
-    fin = finish_index(tiles)
-    finish_square = None if fin is None else fin * SQUARES_PER_TILE
-    return _preview(full_track(tiles), finish_square, width, height, tile_ranges(tiles), selected, tiles[0].kind == KIND_START)
+    return _preview(full_track(tiles), finish_square(tiles), width, height, tile_ranges(tiles), selected,
+                    tiles[0].kind == KIND_START)
 
 
 def track_preview_primitives(track: Track, width: int, height: int) -> list[tuple]:
     """Aperçu d'un parcours quelconque (pour le menu), avec un peu de route après l'arrivée."""
-    extended = Track(track.layout + NORMAL * SQUARES_PER_TILE, track.shape)
+    extended = Track(track.layout + NORMAL * 5, track.angles, track.start)
     return _preview(extended, len(track), width, height)
 
 
@@ -412,7 +422,7 @@ def cosmetic_elevation(track: Track) -> list[float]:
 
     Chaque montée ou descente est allongée ou raccourcie d'au plus 10 %, et de petits accidents (bosses,
     creux) animent la route. Le résultat ne dépend que du tracé : le profil ne change pas d'un affichage à l'autre."""
-    rng = random.Random(zlib.crc32(f"{track.layout}|{track.shape}".encode()))
+    rng = random.Random(zlib.crc32(f"{track.layout}|{track.angles}".encode()))
     n = len(track)
     factor, previous = 1.0, None
     base = [0.0]

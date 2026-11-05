@@ -1,23 +1,31 @@
-import json
+import math
 
 import pytest
 
+from flamme_rouge.game import Game
 from flamme_rouge.official import (
-    BUILT_IN_CATALOG,
-    DATA_FILE,
+    MOUNTAIN_DEFS,
+    OFFICIAL_TILES,
     STAGES,
+    TILE_DEFS,
     build_stage,
-    load_catalog,
     official_stages,
-    template_catalog,
+    official_tile,
+    tile_from_def,
 )
 from flamme_rouge.tiles import (
-    SQUARES_PER_TILE,
-    Tile,
+    KIND_FINISH,
+    KIND_SHARP,
+    KIND_SOFT,
+    KIND_START,
+    KIND_STRAIGHT,
+    OFFICIAL_MAX,
+    finish_square,
     make_tile,
     plan_to_track,
     validate,
 )
+from flamme_rouge.track import ASCENT, LEFT, RIGHT
 
 
 def test_every_stage_uses_each_of_the_21_tiles_exactly_once():
@@ -36,60 +44,76 @@ def test_every_stage_starts_with_a_and_ends_with_u():
         assert setup[0] in "aA" and setup[-1] in "uU", name
 
 
-def test_stages_are_unavailable_until_tiles_are_described():
+def test_all_42_faces_are_described():
+    assert set(TILE_DEFS) == set("abcdefghijklmnopqrstu")
+    assert set(MOUNTAIN_DEFS) == set("ABCDEFGHIJKLMNOPQRSTU")
+    assert len(OFFICIAL_TILES) == 42
+
+
+def test_each_side_of_the_box_matches_the_official_quantities():
+    for letters in ("abcdefghijklmnopqrstu", "ABCDEFGHIJKLMNOPQRSTU"):
+        kinds = [OFFICIAL_TILES[c].kind for c in letters]
+        for kind, count in OFFICIAL_MAX.items():
+            assert kinds.count(kind) == count, (letters, kind)
+
+
+def test_both_faces_of_a_tile_have_the_same_shape_and_turning_flips_the_direction():
+    for lower in "abcdefghijklmnopqrstu":
+        a, b = official_tile(lower), official_tile(lower.upper())
+        assert a.kind == b.kind, lower
+        if a.direction:
+            assert {a.direction, b.direction} == {LEFT, RIGHT}, lower
+
+
+def test_tile_lengths_curves_are_two_squares():
+    for tile in OFFICIAL_TILES.values():
+        assert len(tile.cells) == (2 if tile.kind in (KIND_SOFT, KIND_SHARP) else 6)
+
+
+def test_start_and_finish_faces():
+    assert official_tile("a").grid_squares == 5 and official_tile("A").grid_squares == 4
+    u, U = official_tile("u"), official_tile("U")
+    assert u.cells == "feeeee" and U.cells == "uueeee"
+    assert U.layout[:2] == ASCENT * 2
+
+
+def test_tile_from_def_rejects_unknown_angles():
+    with pytest.raises(ValueError):
+        tile_from_def("x", (math.radians(30), 1), "ff")
+    assert tile_from_def("x", None, "sssssf").kind == KIND_START
+    assert tile_from_def("x", None, "feeeee").kind == KIND_FINISH
+    assert tile_from_def("x", None, "ffffff").kind == KIND_STRAIGHT
+
+
+def test_all_official_stages_are_playable_and_do_not_cross():
     stages = official_stages()
     assert [s.name for s in stages] == list(STAGES)
-    assert all(not s.available for s in stages)  # seules a et u sont connues
-    assert "b" in stages[0].missing and "a" not in stages[0].missing
+    for stage in stages:
+        assert stage.available, stage.name
+        assert validate(stage.tiles) == [], stage.name
 
 
-def test_shipped_template_file_matches_the_template():
-    with open(DATA_FILE, encoding="utf-8") as handle:
-        assert json.load(handle) == template_catalog()
-    assert len([k for k in template_catalog() if not k.startswith("_")]) == 42
+def test_official_stage_lengths():
+    # 6 cases de départ + 7 droites de 6 + 12 virages de 2 + 1 case avant l'arrivée (u)
+    track = plan_to_track(official_stages()[0].tiles)
+    assert track.start == 5
+    assert len(track) == 6 + 7 * 6 + 12 * 2 + 1
+    classicissima = plan_to_track(build_stage("x", STAGES["La Classicissima"]).tiles)
+    assert classicissima.start == 4
 
 
-def test_a_complete_catalog_makes_a_stage_playable(tmp_path):
-    # Faux catalogue : toutes les tuiles du milieu sont des lignes droites plates.
-    data = {c: {"kind": "straight", "direction": None, "terrain": "." * SQUARES_PER_TILE}
-            for c in "bcdefghijklmnopqrst"}
-    path = tmp_path / "tuiles.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    stage = official_stages(str(path))[0]
-    assert stage.available and stage.missing == ()
-    assert len(stage.tiles) == 21
-    track = plan_to_track(stage.tiles)
-    assert len(track) == 20 * SQUARES_PER_TILE
-    # 19 droites : la boîte n'en a que 7, ce qui n'est qu'un avertissement
-    assert all(issue.level == "avertissement" for issue in validate(stage.tiles))
+def test_riders_start_on_the_grid_behind_the_line():
+    track = plan_to_track(official_stages()[0].tiles)
+    game = Game(track, num_teams=4, seed=1)
+    assert sorted({r.position for r in game.riders}) == [1, 2, 3, 4]
+    assert all(r.position < track.start for r in game.riders)
 
 
-def test_uppercase_and_lowercase_sides_are_distinct_entries(tmp_path):
-    data = {"g": {"kind": "sharp", "direction": "L", "terrain": ".." + "A" * (SQUARES_PER_TILE - 2)},
-            "G": {"kind": "straight", "direction": None, "terrain": "." * SQUARES_PER_TILE}}
-    path = tmp_path / "t.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    catalog = load_catalog(str(path))
-    assert catalog["g"].kind == "sharp" and catalog["G"].kind == "straight"
-    assert catalog["a"] == BUILT_IN_CATALOG["a"]  # les valeurs intégrées restent
-
-
-def test_null_and_help_entries_are_ignored(tmp_path):
-    path = tmp_path / "t.json"
-    path.write_text(json.dumps({"_aide": "texte", "b": None}), encoding="utf-8")
-    assert set(load_catalog(str(path))) == set(BUILT_IN_CATALOG)
-
-
-def test_bad_data_gives_a_clear_error(tmp_path):
-    for bad in ({"b": {"kind": "bidon"}}, {"bb": {"kind": "straight"}}, {"b": {"direction": "L"}}, [1, 2]):
-        path = tmp_path / "bad.json"
-        path.write_text(json.dumps(bad), encoding="utf-8")
-        with pytest.raises(ValueError):
-            load_catalog(str(path))
-
-
-def test_missing_data_file_falls_back_to_built_in(tmp_path):
-    assert load_catalog(str(tmp_path / "absent.json")) == BUILT_IN_CATALOG
+def test_mountain_finish_is_two_squares_of_climb_before_the_line():
+    tiles = build_stage("x", STAGES["La Haut Montagne"]).tiles
+    track = plan_to_track(tiles)
+    assert track.layout.endswith(ASCENT * 2)
+    assert finish_square(tiles) == len(track)
 
 
 def test_build_stage_reports_missing_letters_once_each():
