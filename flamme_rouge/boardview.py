@@ -9,6 +9,7 @@ ce qui permet de les tester sans écran. Formats des formes :
 """
 from __future__ import annotations
 
+import math
 import random
 import zlib
 from typing import Iterable, Optional, Sequence
@@ -439,10 +440,90 @@ def cosmetic_elevation(track: Track) -> list[float]:
     return [b + w for b, w in zip(base, smooth)]
 
 
-def profile_primitives(track: Track, width: int, height: int, marker: Optional[float] = None) -> list[tuple]:
-    """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris.
+CLIMB_CATEGORIES = [(10, "HC"), (7, "1"), (5, "2"), (3, "3"), (1, "4")]  # (cases de montée min., nom)
+BADGE_FILL = "#e11d2e"
+BADGE_ANGLE = 12  # inclinaison des badges de col, en degrés
+GROUP_COLORS = {"TÊTE": "#fde047", "TÊTE · PELOTON": "#fde047", "PELOTON": "#ffffff", "LANTERNE ROUGE": "#ff4d4f"}
 
-    `marker` (une case, éventuellement fractionnaire) dessine un trait pour situer un coureur ou le peloton."""
+
+def climb_category(length: int) -> str:
+    """Catégorie d'un col selon son nombre de cases de montée : "4" (petit) à "1", puis "HC" (hors catégorie)."""
+    for minimum, name in CLIMB_CATEGORIES:
+        if length >= minimum:
+            return name
+    raise ValueError("Un col a au moins une case de montée.")
+
+
+def climbs(track: Track) -> list[tuple[int, int, str]]:
+    """Les cols du parcours : (première case de montée, case juste après le sommet, catégorie)."""
+    found, s, n = [], 0, len(track)
+    while s < n:
+        if track.kind(s) != ASCENT:
+            s += 1
+            continue
+        end = s
+        while end < n and track.kind(end) == ASCENT:
+            end += 1
+        found.append((s, end, climb_category(end - s)))
+        s = end
+    return found
+
+
+def race_groups(riders: Sequence[Rider]) -> list[list[Rider]]:
+    """Les groupes de la course, de la tête vers l'arrière : des coureurs sur des cases qui se suivent sans trou."""
+    groups: list[list[Rider]] = []
+    for rider in sorted(riders, key=lambda r: (-r.position, r.lane)):
+        if groups and groups[-1][-1].position - rider.position <= 1:
+            groups[-1].append(rider)
+        else:
+            groups.append([rider])
+    return groups
+
+
+def group_labels(riders: Sequence[Rider]) -> list[tuple[str, list[Rider]]]:
+    """Les groupes à nommer : la tête de course, le peloton (le plus gros groupe) et la lanterne rouge (le dernier)."""
+    groups = race_groups(riders)
+    if not groups:
+        return []
+    if len(groups) == 1:
+        return [("PELOTON", groups[0])]
+    peloton = max(groups, key=len)  # à égalité, le plus en avant
+    if len(peloton) < 2:
+        peloton = None
+    labels = [("TÊTE · PELOTON" if peloton is groups[0] else "TÊTE", groups[0])]
+    if peloton is not None and peloton is not groups[0]:
+        labels.append(("PELOTON", peloton))
+    labels.append(("LANTERNE ROUGE", [groups[-1][-1]]))
+    return labels
+
+
+def _badge_points(cx: float, cy: float, w: float, h: float, r: float, angle: float) -> list[float]:
+    """Rectangle aux coins arrondis, incliné de `angle` degrés (sens inverse des aiguilles d'une montre)."""
+    corners = [(w / 2 - r, h / 2 - r, 0), (-(w / 2 - r), h / 2 - r, 90), (-(w / 2 - r), -(h / 2 - r), 180), (w / 2 - r, -(h / 2 - r), 270)]
+    pts = []
+    for ox, oy, start in corners:
+        for k in range(5):
+            a = math.radians(start + k * 22.5)
+            pts.append((ox + r * math.cos(a), oy + r * math.sin(a)))
+    t = math.radians(angle)
+    out = []
+    for x, y in pts:  # y vers le haut dans ce calcul, vers le bas à l'écran
+        rx, ry = x * math.cos(t) - y * math.sin(t), x * math.sin(t) + y * math.cos(t)
+        out += [cx + rx, cy - ry]
+    return out
+
+
+def profile_primitives(
+    track: Track,
+    width: int,
+    height: int,
+    marker: Optional[float] = None,
+    riders: Optional[Sequence[Rider]] = None,
+) -> list[tuple]:
+    """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris, cols catégorisés.
+
+    `marker` (une case, éventuellement fractionnaire) dessine un trait pour situer un coureur.
+    `riders` place les coureurs sur le profil et nomme la tête de course, le peloton et la lanterne rouge."""
     n = len(track)
     heights = cosmetic_elevation(track)  # altitudes de décor ; les chiffres affichés restent ceux du vrai relief
     low, high = min(heights), max(heights)
@@ -458,6 +539,12 @@ def profile_primitives(track: Track, width: int, height: int, marker: Optional[f
     def y_of(h: float) -> float:
         return base - (h - low) * unit - 4  # 4 px de socle même à l'altitude minimale
 
+    def y_at(square: float) -> float:
+        i = max(0, min(n, int(square)))
+        j = min(n, i + 1)
+        f = max(0.0, min(1.0, square - i))
+        return y_of(heights[i] + (heights[j] - heights[i]) * f)
+
     prims: list[tuple] = []
     fills = pal.PROFILE_FILL
     for s in range(n):
@@ -470,13 +557,98 @@ def profile_primitives(track: Track, width: int, height: int, marker: Optional[f
     for s in range(0, n + 1, step):
         prims.append(("line", x_of(s), base, x_of(s), base + 4, pal.FAINT, 1))
         prims.append(("text", x_of(s), base + 13, str(s), pal.MUTED, 8, False, "center"))
+    if track.start:
+        prims.append(("line", x_of(track.start), y_at(track.start) - 8, x_of(track.start), base, "#ffffff", 2))
     prims.append(("line", x_of(n), PROFILE_PAD_TOP - 4, x_of(n), base, "#ffffff", 3))
     prims.append(("text", x_of(n), PROFILE_PAD_TOP - 12, "ARRIVÉE", "#ffffff", 8, True, "center"))
     climb = sum(1 for s in range(n) if track.kind(s) == ASCENT)
     drop = sum(1 for s in range(n) if track.kind(s) == DESCENT)
     prims.append(("text", PROFILE_PAD_X, 8, f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼", pal.MUTED, 9, True, "w"))
+
+    # badge rouge incliné au sommet de chaque col, avec sa catégorie
+    boxes: list[tuple[float, float, float]] = []  # (gauche, droite, milieu en y) des étiquettes déjà posées
+    for _first, top, category in climbs(track):
+        bw, bh = (24, 15) if category == "HC" else (17, 15)
+        cx = x_of(top)
+        if top >= n:  # arrivée au sommet : le badge se met à gauche de la ligne d'arrivée
+            cx -= bw / 2 + 30  # laisse la place à l'étiquette ARRIVÉE
+        t = math.radians(BADGE_ANGLE)
+        half_w = (bw * math.cos(t) + bh * math.sin(t)) / 2  # demi-encombrement du badge incliné
+        half_h = (bw * math.sin(t) + bh * math.cos(t)) / 2
+        cx = min(max(cx, half_w + 2), width - half_w - 2)
+        cy = max(y_of(heights[top]) - half_h - 4, half_h + 2)
+        boxes.append((cx - half_w, cx + half_w, cy))
+        prims.append(("poly", _badge_points(cx, cy, bw, bh, 4, BADGE_ANGLE), BADGE_FILL, "#ffffff", 1))
+        prims.append(("text", cx, cy, category, "#ffffff", 7, True, "center", BADGE_ANGLE))
+
     if marker is not None:
         m = max(0.0, min(float(n), marker))
         prims.append(("line", x_of(m), PROFILE_PAD_TOP, x_of(m), base, pal.ACCENT, 2))
         prims.append(("oval", x_of(m) - 4, PROFILE_PAD_TOP - 4, x_of(m) + 4, PROFILE_PAD_TOP + 4, pal.ACCENT, "#ffffff", 1))
+
+    if riders:
+        # les groupes nommés, écrits au-dessus des coureurs ; une étiquette qui en chevaucherait une autre
+        # (ou un badge de col) monte d'un cran
+        for name, members in group_labels(riders):
+            front, back = members[0].position, members[-1].position
+            x0, x1 = x_of(back), x_of(min(front + 1, n))
+            color = GROUP_COLORS[name]
+            text = f"{name} · {members[0].name}" if name == "LANTERNE ROUGE" else f"{name} ({len(members)})"
+            half = len(text) * 2.6 + 4
+            mid = min(max((x0 + x1) / 2, half + 2), width - half - 2)
+            lo, hi = min(back, n), min(front, n)  # un coureur peut avoir dépassé la ligne d'arrivée
+            y = min(y_at(min(p + 0.5, n)) for p in range(lo, hi + 1)) - 26
+            while any(abs(y + 3 - by) < 14 and mid - half < bx1 and bx0 < mid + half for bx0, bx1, by in boxes):
+                y -= 11
+            y = max(y, 6)
+            boxes.append((mid - half, mid + half, y))
+            prims.append(("line", x0, y + 6, x1, y + 6, color, 2))
+            prims.append(("text", mid, y, text, color, 7, True, "center"))
+        # chaque coureur : une pastille à la couleur de son équipe, posée sur la route
+        for rider in riders:
+            x = x_of(min(rider.position + 0.5, n))
+            y = y_at(min(rider.position + 0.5, n)) - 5 - 7 * rider.lane
+            prims.append(("oval", x - 4, y - 4, x + 4, y + 4, TEAM_FILL[rider.team], "#ffffff", 1))
+    return prims
+
+
+# ------------------------------------------------------------ petite carte de tuile
+
+CARD_PAD = 6
+CARD_LETTER_W = 18  # bande de gauche qui porte la lettre de la tuile
+CARD_MAX_SCALE = 16  # pixels par case : une ligne droite remplit la carte, un virage reste à la même échelle
+
+
+def tile_card_primitives(tile: Tile, width: int, height: int, selected: bool = False, used: bool = False) -> list[tuple]:
+    """Une tuile seule, dessinée en petit pour la palette de l'éditeur : sa forme, son relief, ses lignes."""
+    bg = pal.CARD_HI if selected else pal.CARD
+    border = SELECTED_COLOR if selected else pal.BORDER
+    prims: list[tuple] = [("rect", 1, 1, width - 1, height - 1, bg, border, 3 if selected else 1)]
+
+    track = full_track([tile])
+    squares = layout_squares(track, extra=0)
+    pts = [p for sq in squares for p in sq.corners]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    area_w, area_h = width - CARD_LETTER_W - 2 * CARD_PAD, height - 2 * CARD_PAD
+    scale = min(CARD_MAX_SCALE, area_w / max(max(xs) - min(xs), 1e-6), area_h / max(max(ys) - min(ys), 1e-6))
+    mx, my = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    cx0 = CARD_LETTER_W + CARD_PAD + area_w / 2
+
+    def tr(p) -> tuple[float, float]:
+        return (cx0 + (p[0] - mx) * scale, height / 2 - (p[1] - my) * scale)
+
+    fin = finish_square([tile])
+    for s, sq in enumerate(squares):
+        beyond = fin is not None and s >= fin
+        fill = BEYOND_FILL if beyond else TERRAIN_FILL[track.kind(s)]
+        prims.append(("poly", [c for p in sq.corners for c in tr(p)], fill, pal.ROAD_OUTLINE, 1))
+    if track.start:
+        _start_line(prims, squares, track.start, tr)
+    if fin is not None and fin < len(squares):
+        _checkered_line(prims, squares, fin, tr)
+
+    letter_color = pal.FAINT if used else pal.TEXT
+    prims.append(("text", CARD_LETTER_W / 2 + 3, height / 2, tile.letter or "?", letter_color, 13, True, "center"))
+    if used:
+        prims.append(("text", width - 5, height - 9, "posée", pal.MUTED, 7, False, "e"))
     return prims

@@ -301,5 +301,6 @@ def paint(canvas, shapes) -> None:
             _, x0, y0, x1, y1, color, width = shape
             canvas.create_line(x0, y0, x1, y1, fill=color, width=width, capstyle="round")
         elif kind == "text":
-            _, x, y, text, color, size, bold, anchor = shape
-            canvas.create_text(x, y, text=text, fill=color, anchor=anchor, font=font(int(size), bool(bold)))
+            _, x, y, text, color, size, bold, anchor, *rest = shape
+            angle = rest[0] if rest else 0  # inclinaison facultative, en degrés
+            canvas.create_text(x, y, text=text, fill=color, anchor=anchor, font=font(int(size), bool(bold)), angle=angle)

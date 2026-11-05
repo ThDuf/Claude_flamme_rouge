@@ -165,3 +165,55 @@ def test_cosmetic_profile_is_stable_bumpy_and_within_ten_percent():
     assert max(abs(first[i + 1] - first[i]) for i in range(10)) < 1.0  # le plat reste presque plat
     texts = {p[3] for p in profile_primitives(track, 560, 130) if p[0] == "text"}
     assert any("12 cases de montée" in t and "12 cases de descente" in t for t in texts)  # les chiffres sont vrais
+
+
+def test_climb_categories_grow_with_the_climb():
+    from flamme_rouge.boardview import climb_category, climbs
+
+    assert [climb_category(n) for n in (1, 2, 3, 4, 5, 6, 7, 9, 10, 12)] == [
+        "4", "4", "3", "3", "2", "2", "1", "1", "HC", "HC"]
+    track = Track("..AAA..DDD.." + "A" * 12)
+    assert climbs(track) == [(2, 5, "3"), (12, 24, "HC")]
+
+
+def test_profile_shows_a_red_badge_at_each_summit():
+    from flamme_rouge.boardview import BADGE_FILL, profile_primitives
+
+    prims = profile_primitives(Track("..AAAAAAA..DDD....AA"), 560, 130)
+    badges = [p for p in prims if p[0] == "poly" and p[2] == BADGE_FILL]
+    texts = [p for p in prims if p[0] == "text" and len(p) == 9]
+    assert len(badges) == 2 and [t[3] for t in texts] == ["1", "4"]
+    assert all(len(t) == 9 and t[8] != 0 for t in texts)  # texte incliné comme le badge
+
+
+def test_race_groups_and_their_names():
+    from flamme_rouge.boardview import group_labels, race_groups
+
+    g = Game(Track("." * 40), num_teams=4, seed=0)
+    for rider, pos in zip(g.riders, (20, 19, 10, 10, 9, 8, 8, 2)):
+        rider.position = pos
+    groups = race_groups(g.riders)
+    assert [[r.position for r in grp] for grp in groups] == [[20, 19], [10, 10, 9, 8, 8], [2]]
+    labels = group_labels(g.riders)
+    assert [(name, len(m)) for name, m in labels] == [("TÊTE", 2), ("PELOTON", 5), ("LANTERNE ROUGE", 1)]
+    for rider in g.riders:
+        rider.position = 5
+    assert [name for name, _ in group_labels(g.riders)] == ["PELOTON"]
+    for rider, pos in zip(g.riders, (20, 20, 19, 18, 18, 17, 5, 4)):
+        rider.position = pos
+    assert [(name, len(m)) for name, m in group_labels(g.riders)] == [("TÊTE · PELOTON", 6), ("LANTERNE ROUGE", 1)]
+
+
+def test_profile_during_the_race_places_riders_and_groups():
+    from flamme_rouge.boardview import profile_primitives
+
+    g = Game(Track("." * 10 + "A" * 6 + "D" * 4 + "." * 20), num_teams=2, seed=0)
+    for rider, pos in zip(g.riders, (30, 12, 12, 3)):
+        rider.position = pos
+    prims = profile_primitives(g.track, 1000, 100, riders=g.riders)
+    texts = {p[3] for p in prims if p[0] == "text"}
+    assert {"TÊTE (1)", "PELOTON (2)"} <= texts and any(t.startswith("LANTERNE ROUGE") for t in texts)
+    dots = [p for p in prims if p[0] == "oval"]
+    assert len(dots) == len(g.riders)
+    g.riders[0].position = 45  # au-delà de la ligne d'arrivée
+    assert profile_primitives(g.track, 1000, 100, riders=g.riders)
