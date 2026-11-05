@@ -7,3 +7,6 @@ venv/
 *.egg-info/
 build/
 dist/
+
+# Parcours enregistrés avec l'éditeur (propres à chaque joueur)
+parcours/
