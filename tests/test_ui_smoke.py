@@ -37,9 +37,14 @@ def test_menu_then_a_whole_game_then_back(root):
     assert menu.start_btn.cget("state") == "normal"  # les étapes officielles sont jouables
     menu.on_pick(menu.rows["base:Classique"].choice)
     menu.teams_var.set(3)
+    assert "jeu de base" in menu.extensions_hint.cget("text")
+    menu.extension_vars["meteo"].set(True)
+    menu._refresh_extensions()
+    assert "pluie" in menu.extensions_hint.cget("text")  # règles Météo programmées
     menu.on_launch()
     app = launcher.app
     assert len(app.game.riders) == 6
+    assert app.game.extensions == frozenset({"meteo"})
     turns = 0
     while app.ctl.phase != FINISHED and turns < 100:
         while app.ctl.phase == CHOOSE:

@@ -284,23 +284,23 @@ class ScrollFrame(tk.Frame):
         self.canvas.yview_scroll(step * 2, "units")
 
 
-def paint(canvas, shapes) -> None:
-    """Dessine des formes du plateau (voir boardview) sur un Canvas."""
+def paint(canvas, shapes, tags=()) -> None:
+    """Dessine des formes du plateau (voir boardview) sur un Canvas (`tags` : étiquettes tkinter des objets)."""
     for shape in shapes:
         kind = shape[0]
         if kind == "rect":
             _, x0, y0, x1, y1, fill, outline, width = shape
-            canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=width)
+            canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=width, tags=tags)
         elif kind == "oval":
             _, x0, y0, x1, y1, fill, outline, width = shape
-            canvas.create_oval(x0, y0, x1, y1, fill=fill, outline=outline, width=width)
+            canvas.create_oval(x0, y0, x1, y1, fill=fill, outline=outline, width=width, tags=tags)
         elif kind == "poly":
             _, points, fill, outline, width = shape
-            canvas.create_polygon(points, fill=fill, outline=outline, width=width)
+            canvas.create_polygon(points, fill=fill, outline=outline, width=width, tags=tags)
         elif kind == "line":
             _, x0, y0, x1, y1, color, width = shape
-            canvas.create_line(x0, y0, x1, y1, fill=color, width=width, capstyle="round")
+            canvas.create_line(x0, y0, x1, y1, fill=color, width=width, capstyle="round", tags=tags)
         elif kind == "text":
             _, x, y, text, color, size, bold, anchor, *rest = shape
             angle = rest[0] if rest else 0  # inclinaison facultative, en degrés
-            canvas.create_text(x, y, text=text, fill=color, anchor=anchor, font=font(int(size), bool(bold)), angle=angle)
+            canvas.create_text(x, y, text=text, fill=color, anchor=anchor, font=font(int(size), bool(bold)), angle=angle, tags=tags)

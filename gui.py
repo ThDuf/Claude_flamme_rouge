@@ -21,7 +21,7 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
-from flamme_rouge.boardview import profile_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, map_window, terrain_text
+from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, map_window, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
     CHOOSE,
@@ -62,11 +62,12 @@ WINDOW_W, WINDOW_H = 1040, 930
 
 
 class App:
-    def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True):
+    def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True,
+                 extensions=()):
         self.parent = root  # conteneur où l'on dessine (la fenêtre, ou un cadre quand on vient du menu)
         self.root = root.winfo_toplevel()  # la fenêtre elle-même : titre, minuteur, fenêtres annexes
         self.root.title("Flamme Rouge")
-        self.game = Game(track=track, num_teams=teams, seed=seed)
+        self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions)
         self.ctl = TurnController(self.game)
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
@@ -77,6 +78,8 @@ class App:
         self.anim = None  # animation en cours (animation.Animation) ou None
         self.anim_start = 0.0
         self.anim_job = None
+        self.fx_job = None  # animation de la météo sur le profil
+        self.fx_start = time.monotonic()
         self.anim_window = None  # cases visibles pendant une animation en mode zoom (figées)
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
@@ -285,6 +288,9 @@ class App:
     def close(self) -> None:
         """À appeler avant de détruire la fenêtre : arrête l'animation et ferme la fenêtre des decks."""
         self.anim = None
+        if self.fx_job is not None:
+            self.root.after_cancel(self.fx_job)
+            self.fx_job = None
         if self.anim_job is not None:
             self.root.after_cancel(self.anim_job)
             self.anim_job = None
@@ -383,7 +389,26 @@ class App:
             view=self.view,
         )
         self._paint(self.board, shapes)
-        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders))
+        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
+                                                     weather=self.game.weather))
+        self._paint_weather_fx()
+
+    WEATHER_FX_MS = 60
+
+    def _paint_weather_fx(self) -> None:
+        """Pluie, vent et soleil animés sur le profil (seulement avec l'extension Météo)."""
+        if not self.game.weather:
+            return
+        t = time.monotonic() - self.fx_start if self.animate_var.get() is True else 0.0
+        self.profile.delete("fx")
+        ui.paint(self.profile, weather_fx_primitives(self.game.track, self.game.weather, BOARD_W, PROFILE_H, t), tags=("fx",))
+        if self.fx_job is None and self.animate_var.get() is True:
+            self.fx_job = self.root.after(self.WEATHER_FX_MS, self._fx_tick)
+
+    def _fx_tick(self) -> None:
+        self.fx_job = None
+        if self.profile.winfo_exists():
+            self._paint_weather_fx()
 
     def _paint(self, canvas, shapes) -> None:
         canvas.delete("all")
