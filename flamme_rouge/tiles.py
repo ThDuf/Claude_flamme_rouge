@@ -240,6 +240,13 @@ def validate(tiles: Sequence[Tile]) -> list[Issue]:
             issues.append(
                 Issue(WARNING, f"{count} {KIND_NAMES[kind].lower()}s : la boîte n'en contient que {OFFICIAL_MAX[kind]}.")
             )
+    used: dict[str, int] = {}
+    for t in tiles:
+        if t.letter:
+            used[t.letter.lower()] = used.get(t.letter.lower(), 0) + 1
+    for letter, count in used.items():
+        if count > 1:
+            issues.append(Issue(WARNING, f"La tuile {letter}/{letter.upper()} est posée {count} fois : la boîte n'en a qu'une."))
     if len(tiles) > OFFICIAL_TOTAL:
         issues.append(Issue(WARNING, f"{len(tiles)} tuiles : la boîte n'en contient que {OFFICIAL_TOTAL}."))
 

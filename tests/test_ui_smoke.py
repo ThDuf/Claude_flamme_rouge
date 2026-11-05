@@ -54,3 +54,26 @@ def test_menu_then_a_whole_game_then_back(root):
     app.reset_view()
     app.on_back()
     assert launcher.app is None
+
+
+def test_editor_tile_cards(root):
+    from editor import EditorApp, WINDOW_H, WINDOW_W
+    from flamme_rouge.tiles import KIND_FINISH, KIND_START, make_tile
+
+    app = EditorApp(root, [make_tile(KIND_START), make_tile(KIND_FINISH)], select_first=True)
+    root.update()
+    assert len(app.palette.cards) == 21
+    assert app.palette.letters[:2] == ["a", "u"]  # départ et arrivée en tête
+    assert root.winfo_reqwidth() <= WINDOW_W and root.winfo_reqheight() <= WINDOW_H
+    app.palette._click(app.palette.letters.index("g"))
+    app.on_place()  # double-clic : après la sélection (le départ)
+    assert [t.letter for t in app.plan.tiles] == [None, "g", None] and app.plan.selected == 1
+    assert "g" in app.palette.used
+    app.palette.select("N")
+    assert app.palette.side_var.get() == "montagne" and app.palette.tile.cells == "uuuuuu"
+    app.on_replace()
+    assert app.plan.tiles[1].letter == "N"
+    app.listbox.selection_clear(0, "end")
+    app.listbox.selection_set(0)
+    app.on_select()
+    assert app.palette.selected == "a"  # la palette suit la tuile choisie dans la liste

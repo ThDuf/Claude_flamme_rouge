@@ -383,8 +383,7 @@ class App:
             view=self.view,
         )
         self._paint(self.board, shapes)
-        leader = max(self.game.riders, key=lambda r: r.position).position
-        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, marker=leader))
+        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders))
 
     def _paint(self, canvas, shapes) -> None:
         canvas.delete("all")

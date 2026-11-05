@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox
 
 import ui
 from flamme_rouge import palette as pal
-from flamme_rouge.boardview import plan_preview_primitives
+from flamme_rouge.boardview import plan_preview_primitives, tile_card_primitives
 from flamme_rouge.paths import ensure_parcours_dir
 from flamme_rouge.plan import PlanEditor
 from flamme_rouge.tiles import (
@@ -22,52 +22,94 @@ from flamme_rouge.tiles import (
     KIND_SOFT,
     KIND_START,
     KIND_STRAIGHT,
-    RELIEF_NAMES,
     example_plan,
     has_errors,
-    make_tile,
     plan_from_json,
     plan_to_json,
     plan_to_track,
     summary,
     validate,
 )
-from flamme_rouge.official import official_tile
-from flamme_rouge.track import LEFT, RIGHT
+from flamme_rouge.official import OFFICIAL_TILES, official_tile
 
-PREVIEW_W, PREVIEW_H = 640, 470
-WINDOW_W, WINDOW_H = 1240, 800
+PREVIEW_W, PREVIEW_H = 600, 470
+WINDOW_W, WINDOW_H = 1280, 800
 
-# (texte affiché, type de tuile, direction, face officielle imposée)
-# Le départ et l'arrivée sont les faces de la boîte (le relief choisi ne s'y applique pas).
-TILE_CHOICES = [
-    ("Départ a (5 places)", KIND_START, None, "a"),
-    ("Départ A (4 places)", KIND_START, None, "A"),
-    ("Arrivée u (plate)", KIND_FINISH, None, "u"),
-    ("Arrivée U (en montée)", KIND_FINISH, None, "U"),
-    ("Ligne droite (6 cases)", KIND_STRAIGHT, None, None),
-    ("Virage doux à gauche (45°, 2 cases)", KIND_SOFT, LEFT, None),
-    ("Virage doux à droite (45°, 2 cases)", KIND_SOFT, RIGHT, None),
-    ("Virage serré à gauche (90°, 2 cases)", KIND_SHARP, LEFT, None),
-    ("Virage serré à droite (90°, 2 cases)", KIND_SHARP, RIGHT, None),
-]
+CARD_W, CARD_H = 96, 50
+CARD_COLUMNS = 3
+FLAT_SIDE, MOUNTAIN_SIDE = "plat", "montagne"
+_KIND_ORDER = {KIND_START: 0, KIND_FINISH: 1, KIND_STRAIGHT: 2, KIND_SOFT: 3, KIND_SHARP: 4}
 
 
-def choice_key(kind, direction, letter=None) -> str:
-    return f"face:{letter}" if letter else f"{kind}:{direction}"
+def side_letters(side: str) -> list[str]:
+    """Les 21 lettres d'une face de la boîte, rangées par type : départ, arrivée, droites, virages doux, serrés."""
+    letters = "abcdefghijklmnopqrstu" if side == FLAT_SIDE else "ABCDEFGHIJKLMNOPQRSTU"
+    return sorted(letters, key=lambda c: (_KIND_ORDER[OFFICIAL_TILES[c].kind], OFFICIAL_TILES[c].direction or "", c))
 
 
-CHOICE_BY_KEY = {choice_key(k, d, l): (text, k, d, l) for text, k, d, l in TILE_CHOICES}
+def letter_for_tile(tile) -> str | None:
+    """Lettre officielle d'une tuile du parcours (une tuile « libre » identique à une face officielle compte)."""
+    if tile.letter in OFFICIAL_TILES:
+        return tile.letter
+    return next((letter for letter, official in OFFICIAL_TILES.items() if official == tile), None)
 
 
-def key_for_tile(tile) -> str:
-    """Entrée de la palette correspondant à une tuile du parcours."""
-    for text, kind, direction, letter in TILE_CHOICES:
-        if letter and official_tile(letter) == tile:
-            return choice_key(kind, direction, letter)
-    if tile.kind in (KIND_START, KIND_FINISH):
-        return choice_key(tile.kind, None, "a" if tile.kind == KIND_START else "u")
-    return choice_key(tile.kind, tile.direction)
+class TilePalette(tk.Frame):
+    """Les tuiles de la boîte en petites cartes : un clic choisit, un double-clic pose la tuile."""
+
+    def __init__(self, parent, on_pick=None, on_place=None):
+        super().__init__(parent, bg=pal.BG)
+        self.on_pick, self.on_place = on_pick, on_place
+        self.side_var = tk.StringVar(value=FLAT_SIDE)
+        self.selected = "b"
+        self.used: set[str] = set()
+        ui.Segmented(self, [(FLAT_SIDE, "Faces plates a–u"), (MOUNTAIN_SIDE, "Faces montagne A–U")], self.side_var,
+                     command=self.redraw).pack(anchor="w", pady=(0, 6))
+        grid = tk.Frame(self, bg=pal.BG)
+        grid.pack(anchor="w")
+        self.cards: list[tk.Canvas] = []
+        for i in range(21):
+            canvas = tk.Canvas(grid, width=CARD_W, height=CARD_H, bg=pal.BG, highlightthickness=0, cursor="hand2")
+            canvas.grid(row=i // CARD_COLUMNS, column=i % CARD_COLUMNS, padx=2, pady=2)
+            canvas.bind("<ButtonRelease-1>", lambda _e, i=i: self._click(i))
+            canvas.bind("<Double-Button-1>", lambda _e, i=i: self._double(i))
+            self.cards.append(canvas)
+        self.redraw()
+
+    @property
+    def letters(self) -> list[str]:
+        return side_letters(self.side_var.get())
+
+    @property
+    def tile(self):
+        return official_tile(self.selected)
+
+    def _click(self, index: int) -> None:
+        self.select(self.letters[index])
+        if self.on_pick is not None:
+            self.on_pick()
+
+    def _double(self, index: int) -> None:
+        self.select(self.letters[index])
+        if self.on_place is not None:
+            self.on_place()
+
+    def select(self, letter: str) -> None:
+        """Choisit une tuile (et affiche la face où elle se trouve)."""
+        self.selected = letter
+        self.side_var.set(FLAT_SIDE if letter.islower() else MOUNTAIN_SIDE)
+        self.redraw()
+
+    def set_used(self, letters) -> None:
+        self.used = {c.lower() for c in letters}
+        self.redraw()
+
+    def redraw(self) -> None:
+        for canvas, letter in zip(self.cards, self.letters):
+            canvas.delete("all")
+            prims = tile_card_primitives(official_tile(letter), CARD_W, CARD_H,
+                                         selected=letter == self.selected, used=letter.lower() in self.used)
+            ui.paint(canvas, prims)
 
 
 class EditorApp:
@@ -80,8 +122,6 @@ class EditorApp:
         self.plan = PlanEditor(tiles if tiles is not None else example_plan())
         if select_first and self.plan.tiles:
             self.plan.select(0)
-        self.kind_var = tk.StringVar(value=f"{KIND_STRAIGHT}:None")
-        self.relief_var = tk.StringVar(value="plat")
         self.teams_var = tk.StringVar(value="2")
         self._build()
         self.refresh()
@@ -105,19 +145,20 @@ class EditorApp:
         # ----- colonne de gauche : la palette de tuiles
         left = tk.Frame(main, bg=pal.BG)
         left.pack(side="left", fill="y", anchor="n")
-        ui.title_label(left, "1 · Choisis une tuile", 11).pack(anchor="w", pady=(0, 4))
-        ui.RadioList(left, [(choice_key(k, d, l), text) for text, k, d, l in TILE_CHOICES], self.kind_var,
-                     command=self._on_palette_change).pack(fill="x")
-        ui.title_label(left, "2 · Choisis son relief", 11).pack(anchor="w", pady=(12, 4))
-        relief = tk.OptionMenu(left, self.relief_var, *RELIEF_NAMES)
-        ui.style_option_menu(relief)
-        relief.pack(fill="x")
-        ui.title_label(left, "3 · Place-la", 11).pack(anchor="w", pady=(12, 4))
-        ui.FlatButton(left, "Ajouter à la fin", self.on_append, style="primary", size=10, pady=6).pack(fill="x", pady=1)
-        self.insert_btn = ui.FlatButton(left, "Insérer après la sélection", self.on_insert, size=10, pady=6)
-        self.insert_btn.pack(fill="x", pady=1)
-        self.replace_btn = ui.FlatButton(left, "Remplacer la sélection", self.on_replace, size=10, pady=6)
-        self.replace_btn.pack(fill="x", pady=1)
+        ui.title_label(left, "1 · Choisis une tuile de la boîte", 11).pack(anchor="w", pady=(0, 4))
+        self.palette = TilePalette(left, on_place=self.on_place)
+        self.palette.pack(anchor="w")
+        tk.Label(left, text="double-clic : pose la tuile après la sélection", font=ui.font(9), bg=pal.BG,
+                 fg=pal.MUTED).pack(anchor="w")
+        ui.title_label(left, "2 · Place-la", 11).pack(anchor="w", pady=(8, 4))
+        places = tk.Frame(left, bg=pal.BG)
+        places.pack(fill="x")
+        ui.FlatButton(places, "À la fin", self.on_append, style="primary", size=9, padx=6, pady=6).pack(
+            side="left", fill="x", expand=True, padx=(0, 2))
+        self.insert_btn = ui.FlatButton(places, "Après la sélection", self.on_insert, size=9, padx=6, pady=6)
+        self.insert_btn.pack(side="left", fill="x", expand=True, padx=2)
+        self.replace_btn = ui.FlatButton(places, "Remplacer", self.on_replace, size=9, padx=6, pady=6)
+        self.replace_btn.pack(side="left", fill="x", expand=True, padx=(2, 0))
 
         # ----- au milieu : la liste des tuiles
         middle = tk.Frame(main, bg=pal.BG)
@@ -180,13 +221,7 @@ class EditorApp:
     # ------------------------------------------------------------------- helpers
 
     def _tile_from_palette(self):
-        text, kind, direction, letter = CHOICE_BY_KEY[self.kind_var.get()]
-        if letter:
-            return official_tile(letter)
-        return make_tile(kind, direction, self.relief_var.get())
-
-    def _on_palette_change(self) -> None:
-        pass  # le choix n'est utilisé qu'au moment d'ajouter, d'insérer ou de remplacer
+        return self.palette.tile
 
     def _guard(self, action) -> None:
         """Exécute une action de l'éditeur et affiche proprement les erreurs de saisie."""
@@ -200,6 +235,13 @@ class EditorApp:
 
     def on_append(self) -> None:
         self._guard(lambda: self.plan.append(self._tile_from_palette()))
+
+    def on_place(self) -> None:
+        """Double-clic sur une carte : après la tuile sélectionnée, ou à la fin s'il n'y en a pas."""
+        if self.plan.selected is None:
+            self.on_append()
+        else:
+            self.on_insert()
 
     def on_insert(self) -> None:
         self._guard(lambda: self.plan.insert_after(self._tile_from_palette()))
@@ -231,14 +273,17 @@ class EditorApp:
         self.plan.select(picked[0])
         tile = self.plan.tiles[picked[0]]
         # la palette reprend la tuile choisie : pratique pour la remplacer par une variante
-        self.kind_var.set(key_for_tile(tile))
-        if tile.relief_name in RELIEF_NAMES:
-            self.relief_var.set(tile.relief_name)
+        letter = letter_for_tile(tile)
+        if letter:
+            self.palette.select(letter)
         self._refresh_preview()
         self._refresh_buttons()
 
     def on_open(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("Parcours Flamme Rouge", "*.json"), ("Tous les fichiers", "*.*")])
+        path = filedialog.askopenfilename(
+            filetypes=[("Parcours Flamme Rouge", "*.json"), ("Tous les fichiers", "*.*")],
+            initialdir=ensure_parcours_dir(),  # le même dossier que pour enregistrer
+        )
         if not path:
             return
         try:
@@ -294,6 +339,7 @@ class EditorApp:
             self.listbox.see(self.plan.selected)
         self._refresh_preview()
         self._refresh_buttons()
+        self.palette.set_used(filter(None, (letter_for_tile(t) for t in tiles)))
 
         self.summary_label.config(text=summary(tiles))
         issues = validate(tiles)
