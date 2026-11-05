@@ -34,6 +34,11 @@ SHADOW = "#143626"
 CURRENT_RING = "#fde047"
 RIDER_OUTLINE = "#ffffff"
 
+# Météo (extension) : couleurs des panneaux
+WEATHER_FILL = {"travers": "#22c55e", "arriere": "#facc15", "face": "#38bdf8", "pluie": "#1e293b"}
+WEATHER_TEXT = {"travers": "#052e16", "arriere": "#422006", "face": "#082f49", "pluie": "#e2e8f0"}
+CRASH_MARK = "#ff4d4f"
+
 # Profil d'étape
 PROFILE_FILL = {".": "#64748b", "A": "#f59e0b", "D": "#38bdf8"}
 PROFILE_LINE = "#e8edf7"

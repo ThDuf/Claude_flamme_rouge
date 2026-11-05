@@ -19,6 +19,7 @@ from .geometry import EXTRA_SQUARES, finish_edge, layout_squares, point_on_road
 from .rider import Rider
 from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
 from .track import ASCENT, DESCENT, NORMAL, Track
+from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
 
 from . import palette as pal
 from .palette import BEYOND_FILL, LABEL_ON_FILL, TEAM_FILL, TEAM_TEXT, TERRAIN_FILL, TERRAIN_SYMBOL_COLOR
@@ -266,11 +267,14 @@ def map_primitives(
         (x0, y0), (x1, y1) = tr(lb), tr(rb)
         prims.append(("text", (x0 + x1) / 2, min(y0, y1) - 16, "ARRIVÉE", "#ffffff", 10, True, "center"))
 
+    _weather_panels(prims, squares, game.weather, first, last, tr, scale)
+
     where = {r: (r.position, r.lane) for r in game.riders}
     if positions:
         where.update(positions)
     radius = max(7.5, min(24, 0.32 * scale))
     font_size = 8 if radius < 9 else 9 if radius < 11 else 11 if radius < 16 else 14
+    crash_labels: set[int] = set()
     for rider in sorted(game.riders, key=lambda r: where[r][0]):  # ceux de derrière d'abord, devant par-dessus
         progress, lane = where[rider]
         cx, cy = tr(point_on_road(squares, progress, lane))
@@ -278,9 +282,46 @@ def map_primitives(
         prims.append(("oval", cx - radius + 1.5, cy - radius + 3, cx + radius + 1.5, cy + radius + 3, pal.SHADOW, "", 0))
         if is_current:  # halo doré autour du coureur qui choisit
             prims.append(("oval", cx - radius - 4, cy - radius - 4, cx + radius + 4, cy + radius + 4, "", pal.CURRENT_RING, 3))
+        if rider.crashed and rider not in (positions or {}):  # à terre : couché (aplati), cerclé de rouge
+            h = radius * 0.6
+            prims.append(("oval", cx - radius, cy - h, cx + radius, cy + h, TEAM_FILL[rider.team], pal.CRASH_MARK, 3))
+            prims.append(("text", cx, cy, rider.name, LABEL_ON_FILL[rider.team], max(font_size - 1, 7), True, "center"))
+            if rider.position not in crash_labels:  # une seule étiquette par case
+                crash_labels.add(rider.position)
+                lx, ly = tr(point_on_road(squares, rider.position, -1.3))  # côté droit, sous les coureurs
+                prims.append(("text", lx, ly, "CHUTE", pal.CRASH_MARK, 8, True, "center"))
+            continue
         prims.append(("oval", cx - radius, cy - radius, cx + radius, cy + radius, TEAM_FILL[rider.team], pal.RIDER_OUTLINE, 2))
         prims.append(("text", cx, cy, rider.name, LABEL_ON_FILL[rider.team], font_size, True, "center"))
     return prims
+
+
+WEATHER_PANEL = (0.12, 0.5)  # bande du panneau météo : de 0,12 à 0,5 case à l'extérieur du bord gauche
+
+
+def _weather_panels(prims: list, squares, weather: Weather, first: int, last: int, tr, scale: float) -> None:
+    """Panneaux météo (extension) : une bande colorée le long du bord gauche de la route (le droit porte les
+    numéros de case), et leur nom."""
+    for zone in weather.effects:
+        shown = [s for s in range(zone.start, zone.end) if first <= s <= last and s < len(squares)]
+        if not shown:
+            continue
+        fill = pal.WEATHER_FILL[zone.effect]
+        for s in shown:
+            sq = squares[s]
+            pts = []
+            for edge, other in ((sq.lb, sq.rb), (sq.lf, sq.rf)):
+                dx, dy = edge[0] - other[0], edge[1] - other[1]
+                norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+                pts.append([(edge[0] + dx / norm * d, edge[1] + dy / norm * d) for d in WEATHER_PANEL])
+            (b0, b1), (f0, f1) = pts
+            prims.append(("poly", [c for p in (b0, f0, f1, b1) for c in tr(p)], fill, "#ffffff", 1))
+        mid = squares[shown[len(shown) // 2]]
+        dx, dy = mid.lb[0] - mid.rb[0], mid.lb[1] - mid.rb[1]
+        norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+        out = 0.9 if scale >= 15 else 1.4
+        px, py = tr((mid.lb[0] + dx / norm * out, mid.lb[1] + dy / norm * out))
+        prims.append(("text", px, py, WEATHER_SHORT[zone.effect], fill if zone.effect != "pluie" else "#cbd5e1", 8, True, "center"))
 
 
 PREVIEW_MARGIN = 78  # laisse la place aux étiquettes DÉPART et ARRIVÉE autour de la route
@@ -513,17 +554,8 @@ def _badge_points(cx: float, cy: float, w: float, h: float, r: float, angle: flo
     return out
 
 
-def profile_primitives(
-    track: Track,
-    width: int,
-    height: int,
-    marker: Optional[float] = None,
-    riders: Optional[Sequence[Rider]] = None,
-) -> list[tuple]:
-    """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris, cols catégorisés.
-
-    `marker` (une case, éventuellement fractionnaire) dessine un trait pour situer un coureur.
-    `riders` place les coureurs sur le profil et nomme la tête de course, le peloton et la lanterne rouge."""
+def _profile_frame(track: Track, width: int, height: int):
+    """Repère du profil : (altitudes de décor, ligne du bas, x d'une case, y d'une altitude, y de la route à une case)."""
     n = len(track)
     heights = cosmetic_elevation(track)  # altitudes de décor ; les chiffres affichés restent ceux du vrai relief
     low, high = min(heights), max(heights)
@@ -545,6 +577,77 @@ def profile_primitives(
         f = max(0.0, min(1.0, square - i))
         return y_of(heights[i] + (heights[j] - heights[i]) * f)
 
+    return heights, base, x_of, y_of, y_at
+
+
+FX_RAIN = "#93c5fd"
+FX_WIND = {TAILWIND: "#fde68a", HEADWIND: "#bae6fd", CROSSWIND: "#bbf7d0"}
+FX_SUN = "#fcd34d"
+
+
+def weather_fx_primitives(track: Track, weather: Weather, width: int, height: int, t: float) -> list[tuple]:
+    """Animation de la météo sur le profil, à l'instant `t` (en secondes) : pluie qui tombe, vent qui souffle
+    (vers l'arrivée pour le vent arrière, vers le départ pour le vent de face, en travers pour le vent de travers),
+    petit soleil sur les lignes droites « beau temps ». Purement décoratif."""
+    n = len(track)
+    _heights, _base, x_of, _y_of, y_at = _profile_frame(track, width, height)
+    top = PROFILE_PAD_TOP - 6
+    prims: list[tuple] = []
+    for k, zone in enumerate(weather.zones):
+        x0, x1 = x_of(zone.start), x_of(min(zone.end, n))
+        w = max(x1 - x0, 1.0)
+        seed = (k * 0.37) % 1.0
+        if zone.effect == RAIN:  # gouttes en biais qui tombent jusqu'à la route
+            for d in range(max(6, int(w / 7))):
+                phase = (d * 0.618 + seed) % 1.0
+                x = x0 + (d + 0.5) * w / max(6, int(w / 7))
+                ground = y_at(zone.start + (x - x0) / w * (min(zone.end, n) - zone.start))
+                y = top + ((t * 1.6 + phase) % 1.0) * max(ground - top - 4, 1)
+                prims.append(("line", x, y, x - 2, y + 6, FX_RAIN, 1))
+        elif zone.effect in FX_WIND:  # traits de vent qui glissent au-dessus de la route
+            direction = {TAILWIND: 1, HEADWIND: -1, CROSSWIND: 0}[zone.effect]
+            for d in range(4):
+                phase = (d * 0.29 + seed) % 1.0
+                ground = min(y_at(s + 0.5) for s in range(zone.start, min(zone.end, n)))
+                level = ground - 8 - d * 6
+                if direction:
+                    f = (t * 0.7 + phase) % 1.0
+                    x = x0 + (f if direction > 0 else 1 - f) * w
+                    tail = x - 10 * direction
+                    prims.append(("line", max(min(tail, x1), x0), level, max(min(x, x1), x0), level, FX_WIND[zone.effect], 2))
+                    prims.append(("line", x, level, x - 3 * direction, level - 2, FX_WIND[zone.effect], 1))
+                else:  # vent de travers : de petites rafales qui traversent de haut en bas
+                    x = x0 + (d + 0.5) * w / 4
+                    f = (t * 0.9 + phase) % 1.0
+                    y = top + f * max(ground - top - 6, 1)
+                    prims.append(("line", x - 4, y, x + 4, y + 3, FX_WIND[zone.effect], 2))
+        elif zone.effect == SUNNY:  # petit soleil dont les rayons tournent
+            cx = (x0 + x1) / 2
+            cy = min(y_at(s + 0.5) for s in range(zone.start, min(zone.end, n))) - 16
+            r = 4.5
+            prims.append(("oval", cx - r, cy - r, cx + r, cy + r, FX_SUN, FX_SUN, 1))
+            for ray in range(8):
+                a = t * 0.8 + ray * math.pi / 4
+                prims.append(("line", cx + math.cos(a) * (r + 2), cy + math.sin(a) * (r + 2),
+                              cx + math.cos(a) * (r + 5), cy + math.sin(a) * (r + 5), FX_SUN, 1))
+    return prims
+
+
+def profile_primitives(
+    track: Track,
+    width: int,
+    height: int,
+    marker: Optional[float] = None,
+    riders: Optional[Sequence[Rider]] = None,
+    weather: Optional[Weather] = None,
+) -> list[tuple]:
+    """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris, cols catégorisés.
+
+    `marker` (une case, éventuellement fractionnaire) dessine un trait pour situer un coureur.
+    `riders` place les coureurs sur le profil et nomme la tête de course, le peloton et la lanterne rouge."""
+    n = len(track)
+    heights, base, x_of, y_of, y_at = _profile_frame(track, width, height)
+
     prims: list[tuple] = []
     fills = pal.PROFILE_FILL
     for s in range(n):
@@ -563,7 +666,13 @@ def profile_primitives(
     prims.append(("text", x_of(n), PROFILE_PAD_TOP - 12, "ARRIVÉE", "#ffffff", 8, True, "center"))
     climb = sum(1 for s in range(n) if track.kind(s) == ASCENT)
     drop = sum(1 for s in range(n) if track.kind(s) == DESCENT)
-    prims.append(("text", PROFILE_PAD_X, 8, f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼", pal.MUTED, 9, True, "w"))
+    title = f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼"
+    if weather:
+        title += "  ·  Météo : " + (", ".join(WEATHER_SHORT[z.effect].lower() for z in weather.effects) or "beau temps")
+        for zone in weather.effects:  # bande colorée sous l'axe, à l'endroit de chaque panneau
+            prims.append(("rect", x_of(zone.start), base + 1, x_of(min(zone.end, n)), base + 5,
+                          pal.WEATHER_FILL[zone.effect], "#ffffff", 1))
+    prims.append(("text", PROFILE_PAD_X, 8, title, pal.MUTED, 9, True, "w"))
 
     # badge rouge incliné au sommet de chaque col, avec sa catégorie
     boxes: list[tuple[float, float, float]] = []  # (gauche, droite, milieu en y) des étiquettes déjà posées

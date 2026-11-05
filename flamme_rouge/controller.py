@@ -69,6 +69,10 @@ class TurnController:
         while self.index < len(riders):
             rider = riders[self.index]
             hand = self.game.draw_hand_for(rider)
+            size = self.game.hand_size(rider)
+            if size != 4:
+                wind = "vent arrière" if size > 4 else "vent de face"
+                self.log.append(LogLine(f"{rider.name} : {wind}, pioche {size} cartes", rider.team))
             if hand:
                 self.hand = hand
                 return
@@ -104,18 +108,24 @@ class TurnController:
         g = self.game
         order = sorted(g.riders, key=lambda r: (-r.position, r.lane))  # du premier au dernier
         start = {r: r.position for r in g.riders}
+        crashed_before = {r: r.crashed for r in g.riders}
         g.movement_phase(self.played)
         self.log.append(LogLine("Mouvement", heading=True))
         for r in order:
             card = self.played[r]
-            effective = g._effective_value(start[r], card.value)
+            effective = g._effective_value(start[r], card.value, crashed_before[r])
+            plain = g._effective_value(start[r], card.value)
             notes = []
-            if effective > card.value:
+            if crashed_before[r]:
+                notes.append("se relève : −2")
+            if plain > card.value:
                 notes.append("descente : 5 minimum")
-            elif effective < card.value:
+            elif plain < card.value:
                 notes.append("montée : plafonné à 5")
             if r.position - start[r] < effective:
-                notes.append("case pleine : s'arrête avant")
+                notes.append("bloqué : s'arrête avant")
+            if r in g.crashed_this_turn:
+                notes.append("CHUTE sous la pluie")
             note = f" ({', '.join(notes)})" if notes else ""
             self.log.append(
                 LogLine(f"{r.name} joue {describe(card)} : case {start[r]} → {r.position}{note}", r.team)

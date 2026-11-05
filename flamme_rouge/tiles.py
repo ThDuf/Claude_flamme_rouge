@@ -205,7 +205,8 @@ def plan_to_track(tiles: Sequence[Tile]) -> Track:
     start = start_squares(tiles)
     if race <= start:
         raise ValueError("Il n'y a aucune case de course avant l'arrivée.")
-    return Track(full.layout[:race], full.angles[:race], start)
+    straights = [(r.start, r.stop) for t, r in zip(tiles, tile_ranges(tiles)) if t.kind == KIND_STRAIGHT and r.stop <= race]
+    return Track(full.layout[:race], full.angles[:race], start, straights)
 
 
 # ----------------------------------------------------------------- validation

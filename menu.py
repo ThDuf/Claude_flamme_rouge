@@ -5,6 +5,7 @@ from tkinter import filedialog, messagebox
 import ui
 from flamme_rouge import palette as pal
 from flamme_rouge.boardview import profile_primitives, track_preview_primitives
+from flamme_rouge.extensions import EXTENSIONS, READY
 from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, GROUP_READY, Choice, build_choices
 from flamme_rouge.paths import PARCOURS_DIR, ensure_parcours_dir
 from flamme_rouge.tiles import KIND_FINISH, KIND_START, make_tile
@@ -13,10 +14,10 @@ PREVIEW_W, PREVIEW_H = 700, 340
 PROFILE_H = 130
 LIST_W = 360
 WINDOW_W, WINDOW_H = 1180, 820
-TEAM_CHOICES = [(2, "2 équipes · 4 coureurs"), (3, "3 équipes · 6 coureurs"), (4, "4 équipes · 8 coureurs")]
+TEAM_CHOICES = [(2, "2 équipes"), (3, "3 équipes"), (4, "4 équipes")]
 GROUP_HINTS = {
     GROUP_BASE: "21 tuiles comme dans la boîte (même composition que les cartes étape, sans en être la copie).",
-    GROUP_OFFICIAL: "Cartes étape du jeu : elles se débloqueront quand les tuiles seront décrites (data/tuiles_officielles.json).",
+    GROUP_OFFICIAL: "Les cartes étape du jeu, avec les tuiles de la boîte.",
     GROUP_MINE: "Parcours créés avec l'éditeur (dossier « parcours »).",
 }
 
@@ -59,7 +60,7 @@ class ChoiceRow(tk.Frame):
 
 class MenuScreen:
     def __init__(self, parent, on_start):
-        """`on_start(track, teams, secret, animate)` est appelé quand on lance la course."""
+        """`on_start(track, teams, secret, animate, extensions)` est appelé quand on lance la course."""
         self.parent = parent
         self.root = parent.winfo_toplevel()
         ui.init(self.root)
@@ -74,6 +75,7 @@ class MenuScreen:
         self.teams_var = tk.IntVar(value=2)
         self.secret_var = tk.BooleanVar(value=False)
         self.animate_var = tk.BooleanVar(value=True)
+        self.extension_vars = {name: tk.BooleanVar(value=False) for name in EXTENSIONS}
         self.editor_win = None
         self._build()
         self.reload()
@@ -142,6 +144,17 @@ class MenuScreen:
         row.pack(anchor="w", pady=(6, 0))
         ui.Toggle(row, "Animations", self.animate_var).pack(side="left", padx=(0, 4))
         ui.Toggle(row, "Mode secret", self.secret_var).pack(side="left")
+        exts = tk.Frame(inner, bg=pal.PANEL)
+        exts.pack(side="left", padx=(28, 0))
+        tk.Label(exts, text="Extensions", font=ui.font(11, True), bg=pal.PANEL, fg=pal.TEXT).pack(anchor="w")
+        row = tk.Frame(exts, bg=pal.PANEL)
+        row.pack(anchor="w", pady=(6, 0))
+        for name, (label, _description) in EXTENSIONS.items():
+            ui.Toggle(row, label, self.extension_vars[name], command=self._refresh_extensions).pack(side="left", padx=(0, 4))
+        self.extensions_hint = tk.Label(exts, text="", font=ui.font(8), bg=pal.PANEL, fg=pal.FAINT, anchor="w",
+                                        justify="left", wraplength=260)
+        self.extensions_hint.pack(anchor="w", pady=(2, 0))
+        self._refresh_extensions()
         self.start_btn = ui.FlatButton(inner, "▶  Lancer la course", self.on_launch, style="primary", size=14, padx=28, pady=12)
         self.start_btn.pack(side="right")
 
@@ -219,7 +232,23 @@ class MenuScreen:
         if not choice.playable:
             messagebox.showinfo("Parcours indisponible", choice.details)
             return
-        self.on_start(choice.track, int(self.teams_var.get()), self.secret_var.get() is True, self.animate_var.get() is True)
+        self.on_start(choice.track, int(self.teams_var.get()), self.secret_var.get() is True, self.animate_var.get() is True,
+                      self.extensions())
+
+    def extensions(self) -> frozenset[str]:
+        """Les extensions cochées."""
+        return frozenset(name for name, var in self.extension_vars.items() if var.get() is True)
+
+    def _refresh_extensions(self) -> None:
+        chosen = self.extensions()
+        waiting = [EXTENSIONS[name][0] for name in EXTENSIONS if name in chosen and name not in READY]
+        if not chosen:
+            text = "aucune : jeu de base"
+        elif waiting:
+            text = f"{', '.join(waiting)} : règles à venir"
+        else:
+            text = " · ".join(EXTENSIONS[name][1] for name in EXTENSIONS if name in chosen)
+        self.extensions_hint.config(text=text)
 
     def on_open_file(self) -> None:
         path = filedialog.askopenfilename(

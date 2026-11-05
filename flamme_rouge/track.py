@@ -54,7 +54,13 @@ class Track:
     considérées comme plates et droites.
     """
 
-    def __init__(self, layout: str = DEFAULT_LAYOUT, shape: Optional[Shape] = None, start: int = 0):
+    def __init__(
+        self,
+        layout: str = DEFAULT_LAYOUT,
+        shape: Optional[Shape] = None,
+        start: int = 0,
+        straights: Optional[Sequence[tuple[int, int]]] = None,
+    ):
         if not layout or any(c not in (NORMAL, ASCENT, DESCENT) for c in layout):
             raise ValueError("Un parcours ne contient que '.', 'A' et 'D' (et n'est pas vide).")
         if shape is None:
@@ -69,6 +75,8 @@ class Track:
         self.layout = layout
         self.angles = angles + (0.0,) * (len(layout) - len(angles))
         self.start = start  # nombre de cases de la grille de départ (derrière la ligne de départ)
+        # lignes droites (hors départ et arrivée), quand le parcours est fait de tuiles : [(première case, fin)]
+        self.straights = None if straights is None else tuple(tuple(s) for s in straights)
 
     def __len__(self) -> int:
         return len(self.layout)

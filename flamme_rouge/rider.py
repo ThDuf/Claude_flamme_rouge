@@ -15,6 +15,7 @@ class Rider:
     recycle: list[Card] = field(default_factory=list)  # défausse de recyclage (face visible)
     hand: list[Card] = field(default_factory=list)  # main en cours de choix (vide hors de la phase d'énergie)
     used: list[Card] = field(default_factory=list)  # cartes jouées : retirées définitivement du jeu
+    crashed: bool = False  # à terre après une chute (extension Météo) : se relève au prochain mouvement
 
     @property
     def name(self) -> str:

@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional, Sequence
 
 from .cards import ROULEUR, SPRINTEUR, Card, exhaustion_card, starting_deck
+from .extensions import METEO, check_extensions
 from .rider import Rider
 from .track import ASCENT, DESCENT, Track
+from .weather import Weather, WeatherZone, draw_weather
 
 HAND_SIZE = 4
 MOUNTAIN_SPEED = 5  # plafond en montée ET minimum en descente
 MAX_PER_SQUARE = 2  # 2 couloirs par case
+CRASH_PENALTY = 2  # extension Météo : un coureur qui se relève avance de 2 cases de moins
 
 # Un "chooser" choisit la carte à jouer parmi la main. C'est le point d'entrée
 # pour brancher plus tard une interface humaine ou une IA.
@@ -28,12 +31,22 @@ class TurnReport:
     played: dict[str, Card] = field(default_factory=dict)
     slipstreamed: list[str] = field(default_factory=list)
     exhausted: list[str] = field(default_factory=list)
+    crashed: list[str] = field(default_factory=list)  # chutes sous la pluie (extension Météo)
 
 
 class Game:
-    def __init__(self, track: Optional[Track] = None, num_teams: int = 2, seed: Optional[int] = None):
+    def __init__(
+        self,
+        track: Optional[Track] = None,
+        num_teams: int = 2,
+        seed: Optional[int] = None,
+        extensions: Iterable[str] = (),
+        weather: Optional[Sequence[WeatherZone]] = None,
+    ):
+        """`weather` impose la météo (sinon, avec l'extension Météo, elle est tirée au hasard)."""
         if not 2 <= num_teams <= 4:
             raise ValueError("Le jeu de base se joue de 2 à 4 équipes.")
+        self.extensions = check_extensions(extensions)  # extensions activées (leurs règles viendront ensuite)
         self.track = track or Track()
         self.rng = random.Random(seed)
         self.turn = 0
@@ -56,6 +69,11 @@ class Game:
             row = i // MAX_PER_SQUARE
             rider.position = grid - 1 - row if grid else row
             rider.lane = i % MAX_PER_SQUARE
+        if weather is None:
+            weather = draw_weather(self.track, self.rng) if METEO in self.extensions else ()
+        self.weather = Weather(weather)
+        self.crashed_this_turn: list[Rider] = []  # chutes du dernier mouvement
+        self.stood_up_this_turn: list[Rider] = []  # coureurs qui se sont relevés au dernier mouvement
 
     # ------------------------------------------------------------------ outils
 
@@ -79,9 +97,13 @@ class Game:
             played[rider] = self.play_from_hand(rider, hand, card)
         return played
 
+    def hand_size(self, rider: Rider) -> int:
+        """4 cartes ; 5 ou 3 si le coureur commence le tour dans un vent arrière ou de face (Météo)."""
+        return self.weather.hand_size(rider.position, HAND_SIZE)
+
     def draw_hand_for(self, rider: Rider) -> list[Card]:
-        """Pioche la main de 4 cartes (moins s'il n'en reste pas assez)."""
-        hand = rider.draw_hand(HAND_SIZE, self.rng)
+        """Pioche la main de 4 cartes (moins s'il n'en reste pas assez ; vent : 5 ou 3)."""
+        hand = rider.draw_hand(self.hand_size(rider), self.rng)
         rider.hand = list(hand)  # copie : sert à afficher le contenu du deck pendant le choix
         return hand
 
@@ -106,18 +128,31 @@ class Game:
 
     # ------------------------------------------------------------ 2. Mouvement
 
-    def _effective_value(self, start: int, value: int) -> int:
-        """Applique les règles de descente (minimum 5) puis de montée (maximum 5)."""
+    def _effective_value(self, start: int, value: int, crashed: bool = False) -> int:
+        """Applique les règles de descente (minimum 5), de relève après une chute (−2), puis de montée (maximum 5)."""
         if self.track.kind(start) == DESCENT:
             value = max(value, MOUNTAIN_SPEED)
+        if crashed:
+            value = max(value - CRASH_PENALTY, 0)
         # Montée : plafond de 5 si on démarre sur, entre dans, ou traverse une case de montée.
         if any(self.track.kind(s) == ASCENT for s in range(start, start + value + 1)):
             value = min(value, MOUNTAIN_SPEED)
         return value
 
+    def is_blocked(self, square: int, exclude: Optional[Rider] = None) -> bool:
+        """Case barrée par une chute : toutes ses files ont un coureur à terre (extension Météo)."""
+        here = self.riders_at(square, exclude=exclude)
+        return len(here) >= MAX_PER_SQUARE and all(r.crashed for r in here)
+
     def _move(self, rider: Rider, card: Card) -> None:
         start = rider.position
-        target = start + self._effective_value(start, card.value)
+        was_crashed = rider.crashed
+        rider.crashed = False  # un coureur à terre se relève au moment de son mouvement
+        if was_crashed:
+            self.stood_up_this_turn.append(rider)
+        wanted = start + self._effective_value(start, card.value, was_crashed)
+        # Une case barrée par une chute ne se traverse pas : on s'arrête avant.
+        target = next((s - 1 for s in range(start + 1, wanted + 1) if self.is_blocked(s, exclude=rider)), wanted)
         # On peut traverser une case pleine mais pas s'y arrêter : on recule
         # jusqu'à la première case avec de la place (au pire, sa case de départ).
         while target > start and len(self.riders_at(target, exclude=rider)) >= MAX_PER_SQUARE:
@@ -125,10 +160,15 @@ class Game:
         others = self.riders_at(target, exclude=rider)
         rider.position = target
         rider.lane = 0 if not any(o.lane == 0 for o in others) else 1
+        # Pluie : bloqué par d'autres coureurs et arrêté sous la pluie -> chute.
+        if target < wanted and self.weather.is_rain(target):
+            rider.crashed = True
+            self.crashed_this_turn.append(rider)
 
     def movement_phase(self, played: dict[Rider, Card]) -> None:
         """Les coureurs avancent un par un, du premier au dernier."""
         order = sorted(self.riders, key=lambda r: (-r.position, r.lane))
+        self.crashed_this_turn, self.stood_up_this_turn = [], []
         for rider in order:
             self._move(rider, played[rider])
 
@@ -153,6 +193,7 @@ class Game:
         plusieurs fois). Un coureur sur une case de montée ne donne ni ne reçoit d'aspiration.
 
         Hypothèse à vérifier : si la case vide visée est elle-même une montée, le pack n'aspire pas.
+        Extension Météo : pareil pour une case de vent de travers ou une case avec un coureur à terre.
         """
         moved: list[Rider] = []
         while True:
@@ -162,11 +203,9 @@ class Game:
                 gap_square = rear[-1] + 1
                 if front[0] - rear[-1] - 1 != 1:
                     continue
-                if self.track.kind(front[0]) == ASCENT:  # ne peut pas donner
+                if self.no_slipstream(front[0]):  # ne peut pas donner
                     continue
-                if self.track.kind(gap_square) == ASCENT or any(
-                    self.track.kind(s) == ASCENT for s in rear
-                ):  # ne peut pas recevoir
+                if self.no_slipstream(gap_square) or any(self.no_slipstream(s) for s in rear):  # ne peut pas recevoir
                     continue
                 to_shift.update(rear)
             if not to_shift:
@@ -176,6 +215,14 @@ class Game:
                     rider.position += 1
                     if rider not in moved:
                         moved.append(rider)
+
+    def no_slipstream(self, square: int) -> bool:
+        """Une case qui ne donne ni ne reçoit d'aspiration : montée, vent de travers, coureur à terre."""
+        return (
+            self.track.kind(square) == ASCENT
+            or self.weather.blocks_slipstream(square)
+            or any(r.crashed for r in self.riders_at(square))
+        )
 
     def apply_exhaustion(self) -> list[Rider]:
         """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2)."""
@@ -213,4 +260,5 @@ class Game:
             played={r.name: c for r, c in played.items()},
             slipstreamed=[r.name for r in slipstreamed],
             exhausted=[r.name for r in exhausted],
+            crashed=[r.name for r in self.crashed_this_turn],
         )
