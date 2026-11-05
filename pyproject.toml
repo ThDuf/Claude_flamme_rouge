@@ -1,0 +1,9 @@
+[project]
+name = "flamme-rouge"
+version = "0.1.0"
+description = "Moteur de règles du jeu de société Flamme Rouge"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

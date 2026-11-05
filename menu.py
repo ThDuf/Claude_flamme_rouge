@@ -1,0 +1,246 @@
+"""Écran de démarrage : choix du parcours, du nombre de coureurs, puis lancement de la course."""
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+import ui
+from flamme_rouge import palette as pal
+from flamme_rouge.boardview import profile_primitives, track_preview_primitives
+from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, GROUP_READY, Choice, build_choices
+from flamme_rouge.paths import PARCOURS_DIR, ensure_parcours_dir
+from flamme_rouge.tiles import KIND_FINISH, KIND_START, make_tile
+
+PREVIEW_W, PREVIEW_H = 700, 340
+PROFILE_H = 130
+LIST_W = 360
+WINDOW_W, WINDOW_H = 1180, 820
+TEAM_CHOICES = [(2, "2 équipes · 4 coureurs"), (3, "3 équipes · 6 coureurs"), (4, "4 équipes · 8 coureurs")]
+GROUP_HINTS = {
+    GROUP_BASE: "21 tuiles comme dans la boîte (même composition que les cartes étape, sans en être la copie).",
+    GROUP_OFFICIAL: "Cartes étape du jeu : elles se débloqueront quand les tuiles seront décrites (data/tuiles_officielles.json).",
+    GROUP_MINE: "Parcours créés avec l'éditeur (dossier « parcours »).",
+}
+
+
+class ChoiceRow(tk.Frame):
+    """Une ligne de la liste des parcours : un titre, un sous-titre, un liseré rouge quand elle est choisie."""
+
+    def __init__(self, parent, choice: Choice, selected: bool, on_click):
+        super().__init__(parent, bg=pal.CARD, cursor="hand2" if choice.playable else "arrow")
+        self.choice, self.selected, self.on_click = choice, selected, on_click
+        self.strip = tk.Frame(self, width=4, bg=pal.CARD)
+        self.strip.pack(side="left", fill="y")
+        body = tk.Frame(self, bg=pal.CARD)
+        body.pack(side="left", fill="x", expand=True, padx=(10, 8), pady=6)
+        self.title = tk.Label(body, text=choice.label, font=ui.font(11, True), bg=pal.CARD, anchor="w", justify="left")
+        self.title.pack(fill="x")
+        sub = choice.details if choice.playable else "Bientôt disponible"
+        self.subtitle = tk.Label(body, text=sub, font=ui.font(9), bg=pal.CARD, anchor="w")
+        self.subtitle.pack(fill="x")
+        self.body = body
+        for widget in (self, self.strip, body, self.title, self.subtitle):
+            widget.bind("<ButtonRelease-1>", lambda _e: self.on_click(self.choice))
+            widget.bind("<Enter>", lambda _e: self.paint(True))
+            widget.bind("<Leave>", lambda _e: self.paint(False))
+        self.paint(False)
+
+    def set_selected(self, selected: bool) -> None:
+        self.selected = selected
+        self.paint(False)
+
+    def paint(self, hover: bool) -> None:
+        playable = self.choice.playable
+        bg = pal.CARD_HI if (self.selected or (hover and playable)) else pal.CARD
+        for widget in (self, self.body, self.title, self.subtitle):
+            widget.configure(bg=bg)
+        self.strip.configure(bg=pal.ACCENT if self.selected else bg)
+        self.title.configure(fg=pal.TEXT if playable else pal.FAINT)
+        self.subtitle.configure(fg=pal.MUTED if playable else pal.FAINT)
+
+
+class MenuScreen:
+    def __init__(self, parent, on_start):
+        """`on_start(track, teams, secret, animate)` est appelé quand on lance la course."""
+        self.parent = parent
+        self.root = parent.winfo_toplevel()
+        ui.init(self.root)
+        self.root.title("Flamme Rouge")
+        ui.place_window(self.root, WINDOW_W, WINDOW_H)
+        parent.configure(bg=pal.BG)
+        self.on_start = on_start
+        self.extra_files: list[str] = []
+        self.choices: list[Choice] = []
+        self.rows: dict[str, ChoiceRow] = {}
+        self.choice_var = tk.StringVar(value="demo")
+        self.teams_var = tk.IntVar(value=2)
+        self.secret_var = tk.BooleanVar(value=False)
+        self.animate_var = tk.BooleanVar(value=True)
+        self.editor_win = None
+        self._build()
+        self.reload()
+
+    # --------------------------------------------------------------- construction
+
+    def _build(self) -> None:
+        # ----- bandeau du haut
+        header = tk.Frame(self.parent, bg=pal.PANEL)
+        header.pack(fill="x")
+        logo = tk.Frame(header, bg=pal.PANEL)
+        logo.pack(side="left", padx=24, pady=(14, 12))
+        tk.Label(logo, text="FLAMME ", font=ui.font(26, True), bg=pal.PANEL, fg=pal.TEXT).pack(side="left")
+        tk.Label(logo, text="ROUGE", font=ui.font(26, True), bg=pal.PANEL, fg=pal.ACCENT).pack(side="left")
+        tk.Label(header, text="Course cycliste à cartes", font=ui.font(11), bg=pal.PANEL, fg=pal.MUTED).pack(
+            side="left", padx=4, pady=(14, 0)
+        )
+        tk.Frame(self.parent, bg=pal.ACCENT, height=3).pack(fill="x")
+
+        # ----- corps : liste à gauche, aperçu à droite
+        body = tk.Frame(self.parent, bg=pal.BG)
+        body.pack(fill="both", expand=True, padx=24, pady=(18, 0))
+
+        left = tk.Frame(body, bg=pal.BG)
+        left.pack(side="left", fill="y")
+        ui.title_label(left, "1 · Choisis le parcours").pack(anchor="w", pady=(0, 8))
+        listing = ui.card(left)
+        listing.pack(fill="both", expand=True)
+        self.scroll = ui.ScrollFrame(listing, width=LIST_W, height=PREVIEW_H + PROFILE_H - 4)
+        self.scroll.pack(fill="both", expand=True, padx=1, pady=1)
+        actions = tk.Frame(left, bg=pal.BG)
+        actions.pack(fill="x", pady=(10, 0))
+        ui.FlatButton(actions, "＋  Créer un parcours", self.on_create, size=10).pack(side="left")
+        ui.FlatButton(actions, "Ouvrir un fichier", self.on_open_file, size=10, style="ghost").pack(side="left", padx=8)
+
+        right = tk.Frame(body, bg=pal.BG)
+        right.pack(side="left", fill="both", expand=True, padx=(24, 0))
+        ui.title_label(right, "Aperçu").pack(anchor="w", pady=(0, 8))
+        view = ui.card(right)
+        view.pack(anchor="w")
+        self.preview = tk.Canvas(view, width=PREVIEW_W, height=PREVIEW_H, bg=pal.GRASS, highlightthickness=0)
+        self.preview.pack(padx=1, pady=(1, 0))
+        self.profile = tk.Canvas(view, width=PREVIEW_W, height=PROFILE_H, bg=pal.CARD, highlightthickness=0)
+        self.profile.pack(padx=1, pady=(0, 1))
+        self.details_title = tk.Label(right, text="", font=ui.font(15, True), bg=pal.BG, fg=pal.TEXT, anchor="w")
+        self.details_title.pack(fill="x", pady=(12, 0))
+        self.details_label = tk.Label(
+            right, text="", font=ui.font(11), bg=pal.BG, fg=pal.MUTED, wraplength=PREVIEW_W, justify="left", anchor="w"
+        )
+        self.details_label.pack(fill="x")
+
+        # ----- barre du bas : équipes, options, lancement
+        tk.Frame(self.parent, bg=pal.BORDER, height=1).pack(fill="x", pady=(18, 0))
+        bottom = tk.Frame(self.parent, bg=pal.PANEL)
+        bottom.pack(fill="x")
+        inner = tk.Frame(bottom, bg=pal.PANEL)
+        inner.pack(fill="x", padx=24, pady=14)
+        step = tk.Frame(inner, bg=pal.PANEL)
+        step.pack(side="left")
+        tk.Label(step, text="2 · Nombre de coureurs", font=ui.font(11, True), bg=pal.PANEL, fg=pal.TEXT).pack(anchor="w")
+        ui.Segmented(step, TEAM_CHOICES, self.teams_var).pack(anchor="w", pady=(6, 0))
+        opts = tk.Frame(inner, bg=pal.PANEL)
+        opts.pack(side="left", padx=(28, 0))
+        tk.Label(opts, text="Options", font=ui.font(11, True), bg=pal.PANEL, fg=pal.TEXT).pack(anchor="w")
+        row = tk.Frame(opts, bg=pal.PANEL)
+        row.pack(anchor="w", pady=(6, 0))
+        ui.Toggle(row, "Animations", self.animate_var).pack(side="left", padx=(0, 4))
+        ui.Toggle(row, "Mode secret", self.secret_var).pack(side="left")
+        self.start_btn = ui.FlatButton(inner, "▶  Lancer la course", self.on_launch, style="primary", size=14, padx=28, pady=12)
+        self.start_btn.pack(side="right")
+
+    # ------------------------------------------------------------------- contenu
+
+    def reload(self) -> None:
+        """Relit la liste des parcours (après un enregistrement dans l'éditeur, par exemple)."""
+        selected = self.choice_var.get()
+        ensure_parcours_dir()
+        self.choices = build_choices(PARCOURS_DIR, self.extra_files)
+        inner = self.scroll.inner
+        for widget in inner.winfo_children():
+            widget.destroy()
+        self.rows = {}
+        keys = {c.key for c in self.choices if c.playable}
+        if selected not in keys:
+            selected = "demo"
+            self.choice_var.set("demo")
+        group = None
+        for choice in self.choices:
+            if choice.group != group:
+                group = choice.group
+                self._group_header(group)
+            row = ChoiceRow(inner, choice, choice.key == selected, self.on_pick)
+            row.pack(fill="x", padx=8, pady=1)
+            self.rows[choice.key] = row
+        if not any(c.group == GROUP_MINE for c in self.choices):
+            self._group_header(GROUP_MINE)
+            tk.Label(
+                inner, text="Aucun pour l'instant : crée-en un avec le bouton ci-dessous.", font=ui.font(9),
+                bg=pal.CARD, fg=pal.FAINT, anchor="w", wraplength=LIST_W - 40, justify="left",
+            ).pack(fill="x", padx=18, pady=(0, 8))
+        self.on_select()
+
+    def _group_header(self, group: str) -> None:
+        tk.Label(self.scroll.inner, text=group.upper(), font=ui.font(9, True), bg=pal.CARD, fg=pal.ACCENT, anchor="w").pack(
+            fill="x", padx=14, pady=(12, 2)
+        )
+        if group in GROUP_HINTS:
+            tk.Label(
+                self.scroll.inner, text=GROUP_HINTS[group], font=ui.font(8), bg=pal.CARD, fg=pal.FAINT, anchor="w",
+                wraplength=LIST_W - 40, justify="left",
+            ).pack(fill="x", padx=14, pady=(0, 4))
+
+    def current(self) -> Choice:
+        key = self.choice_var.get()
+        return next(c for c in self.choices if c.key == key)
+
+    def on_pick(self, choice: Choice) -> None:
+        """Clic sur une ligne : un parcours indisponible s'affiche (avec la raison) mais ne se lance pas."""
+        self.choice_var.set(choice.key)
+        self.on_select()
+
+    def on_select(self) -> None:
+        choice = self.current()
+        for key, row in self.rows.items():
+            row.set_selected(key == choice.key)
+        self.preview.delete("all")
+        self.profile.delete("all")
+        if choice.track is None:
+            self.preview.create_text(
+                PREVIEW_W / 2, PREVIEW_H / 2, text=choice.details, width=PREVIEW_W - 80, fill=pal.MUTED, font=ui.font(12)
+            )
+        else:
+            ui.paint(self.preview, track_preview_primitives(choice.track, PREVIEW_W, PREVIEW_H))
+            ui.paint(self.profile, profile_primitives(choice.track, PREVIEW_W, PROFILE_H))
+        self.details_title.config(text=choice.label)
+        self.details_label.config(text=choice.details)
+        self.start_btn.config(state="normal" if choice.playable else "disabled")
+
+    # ------------------------------------------------------------------- actions
+
+    def on_launch(self) -> None:
+        choice = self.current()
+        if not choice.playable:
+            messagebox.showinfo("Parcours indisponible", choice.details)
+            return
+        self.on_start(choice.track, int(self.teams_var.get()), self.secret_var.get() is True, self.animate_var.get() is True)
+
+    def on_open_file(self) -> None:
+        path = filedialog.askopenfilename(
+            initialdir=ensure_parcours_dir(), filetypes=[("Parcours Flamme Rouge", "*.json"), ("Tous les fichiers", "*.*")]
+        )
+        if not path:
+            return
+        if path not in self.extra_files:
+            self.extra_files.append(path)
+        self.choice_var.set(path)
+        self.reload()
+        if not self.current().playable:
+            messagebox.showwarning("Parcours injouable", self.current().details)
+
+    def on_create(self) -> None:
+        """Ouvre l'éditeur dans une fenêtre à part, avec un départ et une arrivée prêts à recevoir des tuiles."""
+        if self.editor_win is not None and self.editor_win.winfo_exists():
+            self.editor_win.lift()
+            return
+        from editor import EditorApp  # importé ici : l'éditeur n'est utile qu'à la demande
+
+        window = tk.Toplevel(self.root)
+        self.editor_win = window
+        EditorApp(window, [make_tile(KIND_START), make_tile(KIND_FINISH)], on_saved=self.reload, select_first=True)
