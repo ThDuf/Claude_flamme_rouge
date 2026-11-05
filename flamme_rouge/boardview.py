@@ -195,6 +195,55 @@ def pan_view(view: tuple[float, float, float], dx: float, dy: float) -> tuple[fl
     return scale, cx - dx / scale, cy + dy / scale
 
 
+RELIEF_LIGHT = 0.28  # éclaircissement de la route au point le plus haut du parcours
+SHADOW_STEP = 0.9  # pixels d'ombre en plus par case d'altitude (à l'échelle 20 px par case)
+CHEVRON_UP = "#6b2a08"  # brun foncé sur l'orange des montées
+CHEVRON_DOWN = "#0b3556"  # bleu nuit sur le bleu des descentes
+
+
+def road_altitudes(track: Track, count: int) -> list[float]:
+    """Altitude de dessin de chaque case (0 = point le plus bas), sur `count` cases : au-delà de l'arrivée,
+    la route reste à l'altitude de la ligne."""
+    heights = elevation(track)
+    low = min(heights)
+    n = len(track)
+    return [((heights[s] + heights[s + 1]) / 2 if s < n else heights[n]) - low for s in range(count)]
+
+
+def _relief_shadows(prims: list, squares, altitudes: list[float], indices, tr, scale: float) -> None:
+    """Ombre portée sous la route, d'autant plus décalée que la case est haute : la route semble sortir du sol
+    dans les montées et y redescendre dans les descentes. À dessiner avant la route."""
+    unit = max(0.6, min(scale / 20, 2.0))
+    for s in indices:
+        off = (1.5 + altitudes[s] * SHADOW_STEP) * unit
+        pts = [c for p in squares[s].outline for c in tr(p)]
+        shifted = [v + (off * 0.6 if i % 2 == 0 else off) for i, v in enumerate(pts)]
+        prims.append(("poly", shifted, pal.SHADOW, pal.SHADOW, 1))
+
+
+def _relief_fill(fill: str, altitude: float, top: float) -> str:
+    """Plus la route est haute, plus elle est claire (lumière venue d'en haut)."""
+    return _mix(fill, "#ffffff", RELIEF_LIGHT * altitude / top) if top > 0 else fill
+
+
+def _slope_chevrons(prims: list, squares, square: int, kind: str, tr, width: int) -> None:
+    """Chevrons tournés vers l'arrivée : un seul en montée (on grimpe), deux serrés en descente (ça file).
+
+    Repère de point_on_road : la case s va de s − 0,5 à s + 0,5 (s est son centre)."""
+    def at(progress: float, lane: float):
+        return tr(point_on_road(squares, progress, lane))
+
+    if kind == ASCENT:
+        marks = [(square - 0.25, square + 0.25)]
+        color = CHEVRON_UP
+    else:
+        marks = [(square - 0.38, square - 0.05), (square + 0.02, square + 0.35)]
+        color = CHEVRON_DOWN
+    for back, tip in marks:
+        pts = [*at(back, -0.2), *at(tip, 0.5), *at(back, 1.2)]
+        prims.append(("path", pts, color, width))
+
+
 def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
     """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels)."""
     squares = layout_squares(game.track)
@@ -331,15 +380,22 @@ def map_primitives(
     number_every = 1 if scale >= 15 else 5  # sur une grande carte, on ne numérote qu'une case sur cinq
     prims: list[tuple] = [("rect", 0, 0, width, height, pal.GRASS, "", 0)]
     _grass_stripes(prims, width, height)
-    for s in range(first, last + 1):
+
+    def visible(s: int) -> bool:
+        if view is None:
+            return True
+        px, py = zip(*(tr(c) for c in squares[s].corners))  # cadrage manuel : rien hors du cadre
+        return not (max(px) < -40 or min(px) > width + 40 or max(py) < -40 or min(py) > height + 40)
+
+    shown = [s for s in range(first, last + 1) if visible(s)]
+    altitudes = road_altitudes(track, len(squares))
+    top = max(altitudes) if altitudes else 0.0
+    _relief_shadows(prims, squares, altitudes, shown, tr, scale)
+    for s in shown:
         sq = squares[s]
-        if view is not None:  # cadrage manuel : on ne dessine pas ce qui est hors du cadre
-            px, py = zip(*(tr(c) for c in sq.corners))
-            if max(px) < -40 or min(px) > width + 40 or max(py) < -40 or min(py) > height + 40:
-                continue
         beyond = s >= finish
         kind = None if beyond else track.kind(s)
-        fill = BEYOND_FILL if beyond else TERRAIN_FILL[kind]
+        fill = _relief_fill(BEYOND_FILL if beyond else TERRAIN_FILL[kind], altitudes[s], top)
         prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
         # lignes blanches sur les bords de la route (en arc dans les virages)
         for path in (sq.left_path, sq.right_path):
@@ -347,8 +403,6 @@ def map_primitives(
         # trait séparant les deux couloirs
         prims.append(("path", flat(sq.middle_path), pal.LANE_LINE, 1))
         cx, cy = tr(sq.center)
-        if kind is not None and kind != NORMAL and scale >= 9:
-            prims.append(("text", cx, cy, TERRAIN_SYMBOL[kind], TERRAIN_SYMBOL_COLOR[kind], 13 if scale >= 15 else 9, True, "center"))
         if s % number_every == 0:
             # numéro de case, posé à l'extérieur de la route (côté droit)
             rx, ry = tr(((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2))
@@ -356,6 +410,10 @@ def map_primitives(
             norm = max((ox * ox + oy * oy) ** 0.5, 1e-6)
             prims.append(("text", rx + ox / norm * 11, ry + oy / norm * 11, str(s), pal.SQUARE_NUMBER, 8, False, "center"))
 
+    if scale >= 9:  # chevrons de pente, au-dessus de toutes les cases
+        for s in shown:
+            if s < finish and track.kind(s) != NORMAL:
+                _slope_chevrons(prims, squares, s, track.kind(s), tr, 3 if scale >= 25 else 2)
     if track.start and first <= track.start <= last:
         _start_line(prims, squares, track.start, tr)
     if first <= finish <= last + 1:
@@ -458,16 +516,23 @@ def _preview(
         return [c for p in points for c in tr(p)]
 
     prims: list[tuple] = [("rect", 0, 0, width, height, pal.GRASS, "", 0)]
+    race = Track(track.layout[:finish_square], track.angles[:finish_square], track.start) if finish_square else track
+    altitudes = road_altitudes(race, len(squares))
+    top = max(altitudes) if altitudes else 0.0
+    _relief_shadows(prims, squares, altitudes, range(len(squares)), tr, scale)
     for s, sq in enumerate(squares):
         beyond = finish_square is not None and s >= finish_square
         kind = track.kind(s)
-        fill = BEYOND_FILL if beyond else TERRAIN_FILL[kind]
+        fill = _relief_fill(BEYOND_FILL if beyond else TERRAIN_FILL[kind], altitudes[s], top)
         prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
         for path in (sq.left_path, sq.right_path):
             prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
-        if kind != NORMAL and not beyond and scale >= 12 and s not in under_badges:
-            cx, cy = tr(sq.center)
-            prims.append(("text", cx, cy, TERRAIN_SYMBOL[kind], TERRAIN_SYMBOL_COLOR[kind], 11, True, "center"))
+
+    if scale >= 9:  # chevrons de pente, au-dessus de toutes les cases (pas sous les pastilles de tuile)
+        for s in range(len(squares)):
+            beyond = finish_square is not None and s >= finish_square
+            if not beyond and track.kind(s) != NORMAL and s not in under_badges:
+                _slope_chevrons(prims, squares, s, track.kind(s), tr, 2)
 
     if ranges:
         if selected is not None and 0 <= selected < len(ranges):

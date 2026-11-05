@@ -21,7 +21,7 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
-from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, map_window, terrain_text
+from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
     CHOOSE,
@@ -72,7 +72,6 @@ class App:
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
         self.animate_var = tk.BooleanVar(value=animate)
-        self.zoom_var = tk.BooleanVar(value=False)
         self.revealed = False  # en mode secret : la main est-elle affichée ?
         self.deck_win = None  # fenêtre des decks, quand elle est ouverte
         self.anim = None  # animation en cours (animation.Animation) ou None
@@ -80,7 +79,6 @@ class App:
         self.anim_job = None
         self.fx_job = None  # animation de la météo sur le profil
         self.fx_start = time.monotonic()
-        self.anim_window = None  # cases visibles pendant une animation en mode zoom (figées)
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
         self._build()
@@ -137,7 +135,6 @@ class App:
             side="left", padx=10
         )
         ui.Toggle(bar, "Mode secret", self.secret_var, command=self.refresh).pack(side="right")
-        ui.Toggle(bar, "Zoom sur le peloton", self.zoom_var, command=self.on_zoom_toggle).pack(side="right", padx=4)
         ui.Toggle(bar, "Animations", self.animate_var).pack(side="right")
 
         self.standings_frame = tk.Frame(root, bg=pal.BG)
@@ -188,8 +185,6 @@ class App:
         moves = moves_between(before, self.game.riders)
         if moves and phase in (MOVEMENT, SLIPSTREAM) and self.animate_var.get() is True:
             self.anim = movement_animation(moves) if phase == MOVEMENT else slipstream_animation(moves)
-            # en mode zoom, la fenêtre reste fixe pendant l'animation : elle couvre les départs et les arrivées
-            self.anim_window = map_window(self.game, [m.start[0] for m in moves])
             self.anim_start = time.monotonic()
             self.refresh()  # première image, boutons désactivés
             self._tick()
@@ -199,8 +194,7 @@ class App:
     # ------------------------------------------------------------ zoom de la carte
 
     def _auto_view(self):
-        zoom = self.zoom_var.get() is True
-        return map_transform(self.game, zoom, self.anim_window if zoom else None)
+        return map_transform(self.game)
 
     def _focus_view(self):
         """Cadrage automatique, recentré sur le milieu des coureurs : point de départ des boutons ＋ et －."""
@@ -224,10 +218,6 @@ class App:
 
     def on_wheel(self, event) -> None:
         self.zoom_at(1.25 if event.delta > 0 else 0.8, event.x, event.y)
-
-    def on_zoom_toggle(self) -> None:
-        self.view = None  # le choix « peloton / parcours entier » reprend la main
-        self.refresh()
 
     def reset_view(self) -> None:
         self.view = None
@@ -268,7 +258,6 @@ class App:
         if self.anim is None:
             return
         self.anim = None
-        self.anim_window = None
         if self.anim_job is not None:
             self.root.after_cancel(self.anim_job)
             self.anim_job = None
@@ -377,15 +366,12 @@ class App:
         self._flush_log()
 
     def _paint_map(self) -> None:
-        """Dessine la carte : le parcours entier, ou le zoom ; coureurs en mouvement s'il y a une animation."""
-        zoom = self.zoom_var.get() is True
+        """Dessine la carte (parcours entier, ou cadrage manuel) ; coureurs en mouvement s'il y a une animation."""
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
         shapes = map_primitives(
             self.game,
             self.ctl.current_rider,
             positions=positions,
-            zoom=zoom,
-            window=self.anim_window if zoom else None,
             view=self.view,
         )
         self._paint(self.board, shapes)
@@ -402,10 +388,8 @@ class App:
         t = time.monotonic() - self.fx_start if self.animate_var.get() is True else 0.0
         self.profile.delete("fx")
         ui.paint(self.profile, weather_fx_primitives(self.game.track, self.game.weather, BOARD_W, PROFILE_H, t), tags=("fx",))
-        zoom = self.zoom_var.get() is True
         self.board.delete("fx")
-        ui.paint(self.board, map_weather_fx_primitives(self.game, t, zoom=zoom, window=self.anim_window if zoom else None,
-                                                       view=self.view), tags=("fx",))
+        ui.paint(self.board, map_weather_fx_primitives(self.game, t, view=self.view), tags=("fx",))
         if self.fx_job is None and self.animate_var.get() is True:
             self.fx_job = self.root.after(self.WEATHER_FX_MS, self._fx_tick)
 
