@@ -11,13 +11,13 @@ from flamme_rouge.tiles import (
     KIND_SOFT,
     KIND_START,
     KIND_STRAIGHT,
-    RELIEF_PROFILES,
-    SQUARES_PER_TILE,
+    STRAIGHT_LENGTH,
     WARNING,
     Tile,
     example_plan,
     find_crossing,
     finish_index,
+    finish_square,
     full_track,
     has_errors,
     load_track_file,
@@ -25,13 +25,14 @@ from flamme_rouge.tiles import (
     plan_from_json,
     plan_to_json,
     plan_to_track,
+    relief_profiles,
     summary,
     tile_ranges,
     validate,
 )
 from flamme_rouge.track import ASCENT, DESCENT, LEFT, RIGHT
 
-N = SQUARES_PER_TILE
+N = STRAIGHT_LENGTH  # cases d'une ligne droite, du départ et de l'arrivée
 
 
 def simple(*kinds):
@@ -54,58 +55,70 @@ def test_tile_validation():
     with pytest.raises(ValueError):
         Tile(KIND_STRAIGHT, LEFT)  # une droite n'a pas de direction
     with pytest.raises(ValueError):
-        Tile(KIND_STRAIGHT, terrain="..")  # mauvaise longueur
+        Tile(KIND_STRAIGHT, cells="ff")  # mauvaise longueur
     with pytest.raises(ValueError):
-        Tile(KIND_STRAIGHT, terrain="X" * N)
+        Tile(KIND_STRAIGHT, cells="X" * N)
+    with pytest.raises(ValueError):
+        Tile(KIND_SOFT, LEFT, cells="ffffff")  # un virage fait 2 cases
+    with pytest.raises(ValueError):
+        Tile(KIND_START, cells="ffffff")  # un départ commence par sa grille
+    with pytest.raises(ValueError):
+        Tile(KIND_FINISH, cells="eeefff")  # la ligne d'arrivée est suivie de cases 'e' jusqu'au bout
+    with pytest.raises(ValueError):
+        Tile(KIND_STRAIGHT, cells="ffsfff")
     with pytest.raises(ValueError):
         make_tile(KIND_STRAIGHT, relief="volcan")
 
 
 def test_turn_tiles_turn_by_the_right_angle():
-    # 15° par 'L' ou 'R' : un virage doux fait 45° (3 crans), un virage serré 90° (6 crans).
-    assert make_tile(KIND_SOFT, LEFT).shape.count("L") == 3
-    assert make_tile(KIND_SHARP, RIGHT).shape.count("R") == 6
-    assert make_tile(KIND_STRAIGHT).shape == "S" * N
-    assert make_tile(KIND_START).shape == "S" * N and make_tile(KIND_FINISH).shape == "S" * N
+    # Un virage fait 2 cases : 45° (doux) ou 90° (serré) répartis sur ces 2 cases.
+    assert make_tile(KIND_SOFT, LEFT).angles == (22.5, 22.5)
+    assert make_tile(KIND_SHARP, RIGHT).angles == (-45.0, -45.0)
+    assert make_tile(KIND_STRAIGHT).angles == (0.0,) * N
+    assert len(make_tile(KIND_SOFT, LEFT).cells) == 2
 
 
 def test_relief_profiles():
-    assert RELIEF_PROFILES["plat"] == "." * N
-    assert RELIEF_PROFILES["montée"] == "A" * N and RELIEF_PROFILES["descente"] == "D" * N
-    mixed = RELIEF_PROFILES["montée puis descente"]
-    assert mixed == "A" * (N // 2) + "D" * (N - N // 2)
-    assert len(RELIEF_PROFILES) == 9
+    profiles = relief_profiles(N)
+    assert profiles["plat"] == "f" * N
+    assert profiles["montée"] == "u" * N and profiles["descente"] == "d" * N
+    assert profiles["montée puis descente"] == "u" * (N // 2) + "d" * (N - N // 2)
+    assert len(profiles) == 9
+    assert relief_profiles(2)["montée puis descente"] == "ud"
     assert make_tile(KIND_STRAIGHT, relief="montée puis descente").relief_name == "montée puis descente"
-    assert Tile(KIND_STRAIGHT, terrain="A" + "." * (N - 1)).relief_name == "relief personnalisé"
+    assert make_tile(KIND_SHARP, LEFT, "plat puis montée").cells == "fu"
+    assert Tile(KIND_STRAIGHT, cells="u" + "f" * (N - 1)).relief_name == "relief personnalisé"
 
 
 def test_labels_are_readable():
     assert make_tile(KIND_SOFT, LEFT, "montée").label == "Virage doux à gauche — montée"
-    assert make_tile(KIND_START).label == "Départ — plat"
+    assert make_tile(KIND_START).label == "Départ (5 places) — plat"
+    assert Tile(KIND_STRAIGHT, cells="f" * N, letter="b").label == "b · Ligne droite — plat"
 
 
 # ------------------------------------------------------------------ assemblage
 
 
-def test_finish_tile_is_not_part_of_the_race():
-    tiles = simple(KIND_STRAIGHT, KIND_STRAIGHT)  # départ + 2 droites + arrivée
+def test_finish_line_is_inside_the_finish_tile():
+    tiles = simple(KIND_STRAIGHT, KIND_STRAIGHT)  # départ + 2 droites + arrivée "feeeee"
     assert finish_index(tiles) == 3
-    assert len(plan_to_track(tiles)) == 3 * N
+    assert finish_square(tiles) == 3 * N + 1
+    track = plan_to_track(tiles)
+    assert len(track) == 3 * N + 1 and track.start == 5
     assert len(full_track(tiles)) == 4 * N
 
 
-def test_track_carries_terrain_and_shape_of_each_tile():
+def test_track_carries_terrain_and_angles_of_each_tile():
     tiles = [
         make_tile(KIND_START),
         make_tile(KIND_STRAIGHT, relief="montée"),
         make_tile(KIND_SHARP, LEFT, "descente"),
-        make_tile(KIND_FINISH),
+        Tile(KIND_FINISH, cells="uueeee"),
     ]
     track = plan_to_track(tiles)
-    assert track.layout == "." * N + "A" * N + "D" * N
-    assert track.shape == "S" * (2 * N) + "L" * 6 if N == 6 else True
+    assert track.layout == "." * N + "A" * N + "DD" + "AA"
+    assert track.angles == (0.0,) * (2 * N) + (45.0, 45.0) + (0.0, 0.0)
     assert track.kind(N) == ASCENT and track.kind(2 * N) == DESCENT
-    assert track.turn(2 * N + 1) == LEFT
 
 
 def test_plan_without_finish_uses_every_tile():
@@ -115,7 +128,7 @@ def test_plan_without_finish_uses_every_tile():
 
 def test_plan_with_only_a_finish_tile_cannot_be_played():
     with pytest.raises(ValueError):
-        plan_to_track([make_tile(KIND_FINISH)])
+        plan_to_track([Tile(KIND_FINISH, cells="eeeeee")])  # aucune case avant la ligne
     with pytest.raises(ValueError):
         plan_to_track([])
 
@@ -198,6 +211,10 @@ def test_summary_counts():
 def test_json_roundtrip():
     tiles = example_plan()
     assert plan_from_json(plan_to_json(tiles)) == tiles
+    from flamme_rouge.official import official_tile
+
+    again = plan_from_json(plan_to_json([official_tile("A"), official_tile("U")]))
+    assert [t.letter for t in again] == ["A", "U"]
 
 
 def test_json_rejects_garbage():
@@ -208,13 +225,14 @@ def test_json_rejects_garbage():
     with pytest.raises(ValueError):
         plan_from_json(json.dumps({"tiles": [{"kind": "straight"}]}))  # relief manquant
     with pytest.raises(ValueError):
-        plan_from_json(json.dumps({"squares_per_tile": 99, "tiles": []}))
+        plan_from_json(json.dumps({"squares_per_tile": 6, "tiles": []}))  # ancien format
+    assert plan_from_json(json.dumps({"version": 2, "tiles": []})) == []
 
 
 def test_load_track_file(tmp_path):
     good = tmp_path / "ok.json"
     good.write_text(plan_to_json(example_plan()), encoding="utf-8")
-    assert len(load_track_file(str(good))) == (len(example_plan()) - 1) * N
+    assert len(load_track_file(str(good))) == len(plan_to_track(example_plan()))
 
     bad = tmp_path / "bad.json"
     bad.write_text(plan_to_json([make_tile(KIND_STRAIGHT)]), encoding="utf-8")
@@ -298,12 +316,12 @@ def test_preview_draws_every_square_and_numbers_every_tile():
     tiles = example_plan()
     prims = plan_preview_primitives(tiles, 640, 520, selected=3)
     polys = [p for p in prims if p[0] == "poly" and p[2] != "" and p[3] == "#364152"]
-    assert len(polys) == len(tiles) * N
+    assert len(polys) == len(full_track(tiles))
     numbers = {p[3] for p in prims if p[0] == "text"}
     assert {str(i) for i in range(1, len(tiles) + 1)} <= numbers
     assert {"DÉPART", "ARRIVÉE"} <= numbers
     outlines = [p for p in prims if p[0] == "poly" and p[2] == ""]
-    assert len(outlines) == N  # seule la tuile sélectionnée est entourée
+    assert len(outlines) == len(tiles[3].cells)  # seule la tuile sélectionnée est entourée
 
 
 def test_preview_stays_on_canvas_and_handles_edge_cases():

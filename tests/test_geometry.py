@@ -4,7 +4,7 @@ import pytest
 
 from flamme_rouge import Game, Track
 from flamme_rouge.geometry import ROAD_WIDTH, finish_edge, layout_squares
-from flamme_rouge.track import DEFAULT_LAYOUT, DEFAULT_SHAPE
+from flamme_rouge.track import DEFAULT_LAYOUT, DEFAULT_SHAPE, shape_to_angles
 
 
 def dist(a, b):
@@ -29,10 +29,17 @@ def test_shape_validation():
 
 
 def test_shape_defaults():
-    assert Track().shape == DEFAULT_SHAPE and len(DEFAULT_SHAPE) == len(DEFAULT_LAYOUT)
-    assert Track("." * 10).shape == "S" * 10  # parcours perso : droit tant qu'on ne dit rien
-    assert Track("." * 5, "LL").shape == "LLSSS"  # forme plus courte : complétée par du droit
-    assert Track().turn(999) == "S"
+    assert Track().angles == shape_to_angles(DEFAULT_SHAPE) and len(DEFAULT_SHAPE) == len(DEFAULT_LAYOUT)
+    assert Track("." * 10).angles == (0.0,) * 10  # parcours perso : droit tant qu'on ne dit rien
+    assert Track("." * 5, "LR").angles == (15.0, -15.0, 0.0, 0.0, 0.0)  # forme plus courte : complétée par du droit
+    assert Track("." * 3, [30, 0, -10]).angles == (30.0, 0.0, -10.0)  # angles donnés en degrés
+    assert Track().angle(999) == 0.0
+
+
+def test_start_grid_must_leave_race_squares():
+    assert Track("." * 6, start=5).start == 5
+    with pytest.raises(ValueError):
+        Track("." * 5, start=5)
 
 
 def test_shape_does_not_change_the_rules():
@@ -99,3 +106,12 @@ def test_finish_edge_is_after_the_last_square():
     squares = layout_squares(track)
     lb, rb = finish_edge(squares, track)
     assert lb == squares[len(track)].lb and rb == squares[len(track)].rb
+
+
+def test_curve_squares_turn_the_road_by_their_angle():
+    # Un virage serré à gauche (2 cases de 45°) : après lui, la route va vers le nord.
+    squares = layout_squares(Track("." * 4, [45, 45, 0, 0]), extra=0)
+    lb, rb = squares[2].lb, squares[2].rb
+    assert lb[0] - rb[0] == pytest.approx(-ROAD_WIDTH) and lb[1] - rb[1] == pytest.approx(0, abs=1e-9)
+    # côté intérieur du virage plus court que l'extérieur (cases en éventail)
+    assert dist(squares[0].lb, squares[0].lf) < dist(squares[0].rb, squares[0].rf)

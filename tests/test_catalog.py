@@ -1,4 +1,3 @@
-import json
 import os
 import time
 
@@ -26,20 +25,11 @@ def test_ready_to_play_choices(tmp_path):
     assert example.playable and example.tiles and example.details.endswith("14 tuiles")
 
 
-def test_official_stages_are_listed_but_not_playable_yet(tmp_path):
+def test_official_stages_are_listed_and_playable(tmp_path):
     official = [c for c in build_choices(str(tmp_path)) if c.group == GROUP_OFFICIAL]
     assert [c.label for c in official][0] == "Avenue Corso Paseo" and len(official) == 5
-    assert all(not c.playable for c in official)
-    assert "tuiles" in official[0].details and "tuiles_officielles.json" in official[0].details
-
-
-def test_official_stage_becomes_playable_with_a_complete_catalog(tmp_path):
-    letters = "bcdefghijklmnopqrst"
-    data = {c: {"kind": "straight", "direction": None, "terrain": "......"} for c in letters + letters.upper()}
-    catalog = tmp_path / "tuiles.json"
-    catalog.write_text(json.dumps(data), encoding="utf-8")
-    official = [c for c in build_choices(str(tmp_path), official_path=str(catalog)) if c.group == GROUP_OFFICIAL]
     assert all(c.playable for c in official)
+    assert official[0].details.endswith("21 tuiles")
 
 
 def test_saved_files_are_listed_newest_first(tmp_path):

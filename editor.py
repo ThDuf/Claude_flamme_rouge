@@ -22,7 +22,7 @@ from flamme_rouge.tiles import (
     KIND_SOFT,
     KIND_START,
     KIND_STRAIGHT,
-    RELIEF_PROFILES,
+    RELIEF_NAMES,
     example_plan,
     has_errors,
     make_tile,
@@ -32,22 +32,42 @@ from flamme_rouge.tiles import (
     summary,
     validate,
 )
+from flamme_rouge.official import official_tile
 from flamme_rouge.track import LEFT, RIGHT
 
 PREVIEW_W, PREVIEW_H = 640, 470
 WINDOW_W, WINDOW_H = 1240, 800
 
-# (texte affiché, type de tuile, direction)
+# (texte affiché, type de tuile, direction, face officielle imposée)
+# Le départ et l'arrivée sont les faces de la boîte (le relief choisi ne s'y applique pas).
 TILE_CHOICES = [
-    ("Départ", KIND_START, None),
-    ("Arrivée", KIND_FINISH, None),
-    ("Ligne droite", KIND_STRAIGHT, None),
-    ("Virage doux à gauche (45°)", KIND_SOFT, LEFT),
-    ("Virage doux à droite (45°)", KIND_SOFT, RIGHT),
-    ("Virage serré à gauche (90°)", KIND_SHARP, LEFT),
-    ("Virage serré à droite (90°)", KIND_SHARP, RIGHT),
+    ("Départ a (5 places)", KIND_START, None, "a"),
+    ("Départ A (4 places)", KIND_START, None, "A"),
+    ("Arrivée u (plate)", KIND_FINISH, None, "u"),
+    ("Arrivée U (en montée)", KIND_FINISH, None, "U"),
+    ("Ligne droite (6 cases)", KIND_STRAIGHT, None, None),
+    ("Virage doux à gauche (45°, 2 cases)", KIND_SOFT, LEFT, None),
+    ("Virage doux à droite (45°, 2 cases)", KIND_SOFT, RIGHT, None),
+    ("Virage serré à gauche (90°, 2 cases)", KIND_SHARP, LEFT, None),
+    ("Virage serré à droite (90°, 2 cases)", KIND_SHARP, RIGHT, None),
 ]
-CHOICE_BY_KEY = {f"{kind}:{direction}": (text, kind, direction) for text, kind, direction in TILE_CHOICES}
+
+
+def choice_key(kind, direction, letter=None) -> str:
+    return f"face:{letter}" if letter else f"{kind}:{direction}"
+
+
+CHOICE_BY_KEY = {choice_key(k, d, l): (text, k, d, l) for text, k, d, l in TILE_CHOICES}
+
+
+def key_for_tile(tile) -> str:
+    """Entrée de la palette correspondant à une tuile du parcours."""
+    for text, kind, direction, letter in TILE_CHOICES:
+        if letter and official_tile(letter) == tile:
+            return choice_key(kind, direction, letter)
+    if tile.kind in (KIND_START, KIND_FINISH):
+        return choice_key(tile.kind, None, "a" if tile.kind == KIND_START else "u")
+    return choice_key(tile.kind, tile.direction)
 
 
 class EditorApp:
@@ -86,10 +106,10 @@ class EditorApp:
         left = tk.Frame(main, bg=pal.BG)
         left.pack(side="left", fill="y", anchor="n")
         ui.title_label(left, "1 · Choisis une tuile", 11).pack(anchor="w", pady=(0, 4))
-        ui.RadioList(left, [(f"{kind}:{direction}", text) for text, kind, direction in TILE_CHOICES], self.kind_var,
+        ui.RadioList(left, [(choice_key(k, d, l), text) for text, k, d, l in TILE_CHOICES], self.kind_var,
                      command=self._on_palette_change).pack(fill="x")
         ui.title_label(left, "2 · Choisis son relief", 11).pack(anchor="w", pady=(12, 4))
-        relief = tk.OptionMenu(left, self.relief_var, *RELIEF_PROFILES.keys())
+        relief = tk.OptionMenu(left, self.relief_var, *RELIEF_NAMES)
         ui.style_option_menu(relief)
         relief.pack(fill="x")
         ui.title_label(left, "3 · Place-la", 11).pack(anchor="w", pady=(12, 4))
@@ -160,7 +180,9 @@ class EditorApp:
     # ------------------------------------------------------------------- helpers
 
     def _tile_from_palette(self):
-        text, kind, direction = CHOICE_BY_KEY[self.kind_var.get()]
+        text, kind, direction, letter = CHOICE_BY_KEY[self.kind_var.get()]
+        if letter:
+            return official_tile(letter)
         return make_tile(kind, direction, self.relief_var.get())
 
     def _on_palette_change(self) -> None:
@@ -209,8 +231,8 @@ class EditorApp:
         self.plan.select(picked[0])
         tile = self.plan.tiles[picked[0]]
         # la palette reprend la tuile choisie : pratique pour la remplacer par une variante
-        self.kind_var.set(f"{tile.kind}:{tile.direction}")
-        if tile.relief_name in RELIEF_PROFILES:
+        self.kind_var.set(key_for_tile(tile))
+        if tile.relief_name in RELIEF_NAMES:
             self.relief_var.set(tile.relief_name)
         self._refresh_preview()
         self._refresh_buttons()

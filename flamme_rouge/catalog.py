@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
 from .circuits import base_circuits
-from .official import DATA_FILE, official_stages
+from .official import official_stages
 from .paths import PARCOURS_DIR
 from .tiles import ERROR, Tile, example_plan, plan_from_json, plan_to_track, validate
 from .track import Track
@@ -68,7 +68,6 @@ def saved_files(parcours_dir: str = PARCOURS_DIR) -> list[str]:
 def build_choices(
     parcours_dir: str = PARCOURS_DIR,
     extra_files: Iterable[str] = (),
-    official_path: str = DATA_FILE,
 ) -> list[Choice]:
     choices = [
         Choice("demo", "Circuit de démonstration (50 cases)", GROUP_READY, Track()),
@@ -77,11 +76,11 @@ def build_choices(
     for name, description, tiles in base_circuits():
         base = choice_from_tiles(f"base:{name}", name, GROUP_BASE, tiles)
         choices.append(base)
-    for stage in official_stages(official_path):
+    for stage in official_stages():
         if stage.available:
             choices.append(choice_from_tiles(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, stage.tiles))
         else:
-            problem = f"Pas encore disponible : il manque la description de {len(stage.missing)} tuiles (voir data/tuiles_officielles.json)."
+            problem = f"Tuiles inconnues : {', '.join(stage.missing)}."
             choices.append(Choice(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, problem=problem))
 
     paths = saved_files(parcours_dir)[:MAX_SAVED_FILES]

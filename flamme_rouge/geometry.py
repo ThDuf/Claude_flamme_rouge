@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .track import LEFT, RIGHT, TURN_STEP_DEGREES, Track
+from .track import Track
 
 ROAD_WIDTH = 1.4  # largeur de la route (2 couloirs), pour une case de longueur 1
 EXTRA_SQUARES = 14  # cases dessinées après la ligne d'arrivée (un coureur peut la dépasser)
@@ -50,50 +50,46 @@ class SquareGeom:
 
 
 def layout_squares(track: Track, extra: int = EXTRA_SQUARES) -> list[SquareGeom]:
-    """Les cases du parcours puis `extra` cases droites après la ligne d'arrivée."""
+    """Les cases du parcours puis `extra` cases droites après la ligne d'arrivée.
+
+    Chaque case est un trapèze : la ligne médiane fait 1 de long, et la route tourne de
+    `track.angle(i)` degrés entre le bord arrière et le bord avant de la case (comme les
+    cases en éventail d'une tuile de virage). Les bords entre cases sont perpendiculaires à la route."""
     total = len(track) + extra
-    step = math.radians(TURN_STEP_DEGREES)
-
-    headings: list[float] = []
-    centers: list[Point] = []
-    heading = 0.0
-    x = y = 0.0
-    for i in range(total):
-        turn = track.turn(i)
-        if turn == LEFT:
-            heading += step
-        elif turn == RIGHT:
-            heading -= step
-        headings.append(heading)
-        if i == 0:
-            x, y = 0.0, 0.0
-        else:
-            x += math.cos(heading)
-            y += math.sin(heading)
-        centers.append((x, y))
-
     half = ROAD_WIDTH / 2
 
-    def boundary(i: int) -> tuple[Point, Point]:
-        """Bord entre la case i-1 et la case i (gauche, droite)."""
-        if i == 0:
-            h = headings[0]
-            c = (centers[0][0] - 0.5 * math.cos(h), centers[0][1] - 0.5 * math.sin(h))
-        elif i == total:
-            h = headings[-1]
-            c = (centers[-1][0] + 0.5 * math.cos(h), centers[-1][1] + 0.5 * math.sin(h))
-        else:
-            h = (headings[i - 1] + headings[i]) / 2
-            c = _mid(centers[i - 1], centers[i])
-        left = (c[0] - half * math.sin(h), c[1] + half * math.cos(h))
-        right = (c[0] + half * math.sin(h), c[1] - half * math.cos(h))
+    edges: list[tuple[Point, Point]] = []
+    heading = 0.0  # direction de la route au bord courant, en radians
+    x = y = 0.0
+
+    def edge() -> tuple[Point, Point]:
+        left = (x - half * math.sin(heading), y + half * math.cos(heading))
+        right = (x + half * math.sin(heading), y - half * math.cos(heading))
         return left, right
 
-    edges = [boundary(i) for i in range(total + 1)]
+    edges.append(edge())
+    for i in range(total):
+        turn = math.radians(track.angle(i))
+        if abs(turn) < 1e-9:
+            x += math.cos(heading)
+            y += math.sin(heading)
+        else:  # arc de longueur 1 : on avance selon la corde
+            chord = 2 * math.sin(turn / 2) / turn
+            x += chord * math.cos(heading + turn / 2)
+            y += chord * math.sin(heading + turn / 2)
+        heading += turn
+        edges.append(edge())
+
     return [
         SquareGeom(lb=edges[i][0], rb=edges[i][1], rf=edges[i + 1][1], lf=edges[i + 1][0])
         for i in range(total)
     ]
+
+
+def start_edge(squares: list[SquareGeom], track: Track) -> tuple[Point, Point]:
+    """Extrémités de la ligne de départ (bord arrière de la première case de course)."""
+    sq = squares[track.start]
+    return sq.lb, sq.rb
 
 
 def _lerp(a: Point, b: Point, f: float) -> Point:

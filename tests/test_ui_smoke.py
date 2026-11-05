@@ -34,7 +34,7 @@ def test_menu_then_a_whole_game_then_back(root):
     menu = MenuScreen(launcher.container, launcher.start_game)
     assert menu.start_btn.cget("state") == "normal"
     menu.on_pick(menu.rows["officiel:Ronde van Wevelgem"].choice)
-    assert menu.start_btn.cget("state") == "disabled"  # étape officielle pas encore décrite
+    assert menu.start_btn.cget("state") == "normal"  # les étapes officielles sont jouables
     menu.on_pick(menu.rows["base:Classique"].choice)
     menu.teams_var.set(3)
     menu.on_launch()

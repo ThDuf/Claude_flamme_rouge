@@ -1,28 +1,63 @@
-"""Parcours officiels : les cartes étape du jeu, assemblées à partir du catalogue de tuiles.
+"""Les 21 tuiles de la boîte (faces a–u et A–U) et les cartes étape officielles.
 
-Une carte étape donne l'ordre des 21 tuiles par une chaîne de lettres (minuscule = côté
-d'origine de la tuile, majuscule = côté retourné). Il manque ici la description de chaque
-côté de tuile (ligne droite, virage doux ou serré, gauche ou droite, relief), que les
-sources en ligne ne donnent pas : elle se renseigne dans `data/tuiles_officielles.json`.
-Dès qu'une étape n'a plus aucune lettre manquante, elle devient jouable dans le menu.
+Chaque face de tuile est décrite par (virage, cases) :
+  virage : None pour une ligne droite (ou le départ, l'arrivée),
+           sinon (angle en radians, sens) avec sens +1 = à gauche, -1 = à droite ;
+  cases  : une lettre par case (CELL_CHARS de tiles.py) : f plat, u montée, d descente,
+           s grille de départ, e après la ligne d'arrivée.
+Une ligne droite, le départ et l'arrivée font 6 cases ; un virage 2.
 
-Format d'une entrée de `data/tuiles_officielles.json` (la clé est la lettre, majuscule ou minuscule) :
-    "g": {"kind": "sharp", "direction": "L", "terrain": "..AAAA"}
-  kind      : "start", "finish", "straight", "soft" (virage doux 45°) ou "sharp" (virage serré 90°)
-  direction : "L" ou "R" pour un virage, null sinon
-  terrain   : une lettre par case, dans le sens de la course : "." plat, "A" montée, "D" descente
-Les entrées à null (ou absentes) sont considérées comme inconnues.
+Une carte étape donne l'ordre des 21 tuiles par une chaîne de lettres
+(minuscule = face plate, majuscule = face montagne).
 """
 from __future__ import annotations
 
-import json
-import os
+import math
 from dataclasses import dataclass
 from typing import Optional
 
-from .tiles import KIND_FINISH, KIND_START, SQUARES_PER_TILE, Tile
+from .tiles import KIND_FINISH, KIND_SHARP, KIND_SOFT, KIND_START, KIND_STRAIGHT, Tile
+from .track import LEFT, RIGHT
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "tuiles_officielles.json")
+DEG45 = math.pi / 4
+DEG90 = math.pi / 2
+GAUCHE, DROITE = +1, -1
+
+# Faces plates (a–u)
+TILE_DEFS: dict[str, tuple[Optional[tuple[float, int]], str]] = {
+    "a": (None, "sssssf"),  # départ
+    "u": (None, "feeeee"),  # arrivée
+    **{k: (None, "ffffff") for k in "bcdflmn"},  # 7 lignes droites
+    **{k: ((DEG45, GAUCHE), "ff") for k in "hqt"},
+    **{k: ((DEG45, DROITE), "ff") for k in "krs"},
+    **{k: ((DEG90, GAUCHE), "ff") for k in "egi"},
+    **{k: ((DEG90, DROITE), "ff") for k in "jop"},
+}
+
+# Faces montagne (A–U), relevées sur les tuiles physiques. Retourner un virage inverse son sens.
+MOUNTAIN_DEFS: dict[str, tuple[Optional[tuple[float, int]], str]] = {
+    "A": (None, "ssssff"),  # départ
+    "U": (None, "uueeee"),  # arrivée : 2 montées puis la ligne
+    "B": (None, "ddddff"),
+    "C": (None, "fffuuu"),
+    "D": (None, "uuuuud"),
+    "F": (None, "dddfff"),
+    "L": (None, "uuuddd"),
+    "M": (None, "ffuuuu"),
+    "N": (None, "uuuuuu"),
+    "E": ((DEG90, DROITE), "uu"),
+    "G": ((DEG90, DROITE), "uu"),
+    "I": ((DEG90, DROITE), "ff"),
+    "J": ((DEG90, GAUCHE), "ff"),
+    "O": ((DEG90, GAUCHE), "uu"),
+    "P": ((DEG90, GAUCHE), "dd"),
+    "H": ((DEG45, DROITE), "dd"),
+    "Q": ((DEG45, DROITE), "uu"),
+    "T": ((DEG45, DROITE), "ff"),
+    "K": ((DEG45, GAUCHE), "uu"),
+    "R": ((DEG45, GAUCHE), "uu"),
+    "S": ((DEG45, GAUCHE), "ff"),
+}
 
 # Les 5 cartes étape retranscrites depuis le règlement officiel (la 6e n'apparaît pas dans les sources).
 STAGES = {
@@ -33,71 +68,44 @@ STAGES = {
     "Firenze - Milano": "abcgiDHqntmKOLrepJsfu",
 }
 
-# Seules certitudes : la tuile a est le départ et la tuile u l'arrivée (leur relief est supposé plat).
-BUILT_IN_CATALOG = {
-    "a": Tile(KIND_START),
-    "A": Tile(KIND_START),
-    "u": Tile(KIND_FINISH),
-    "U": Tile(KIND_FINISH),
+
+def tile_from_def(letter: str, turn: Optional[tuple[float, int]], cells: str) -> Tile:
+    if turn is None:
+        kind = KIND_START if "s" in cells else KIND_FINISH if "e" in cells else KIND_STRAIGHT
+        return Tile(kind, None, cells, letter)
+    angle, sens = turn
+    kind = KIND_SOFT if math.isclose(angle, DEG45) else KIND_SHARP if math.isclose(angle, DEG90) else None
+    if kind is None:
+        raise ValueError(f"Tuile {letter} : virage de {math.degrees(angle):.0f}° inconnu.")
+    return Tile(kind, LEFT if sens > 0 else RIGHT, cells, letter)
+
+
+OFFICIAL_TILES: dict[str, Tile] = {
+    letter: tile_from_def(letter, turn, cells) for letter, (turn, cells) in {**TILE_DEFS, **MOUNTAIN_DEFS}.items()
 }
+
+
+def official_tile(letter: str) -> Tile:
+    return OFFICIAL_TILES[letter]
 
 
 @dataclass(frozen=True)
 class OfficialStage:
     name: str
     setup: str
-    tiles: Optional[tuple[Tile, ...]]  # None tant qu'il manque des tuiles
-    missing: tuple[str, ...]  # lettres dont le côté n'est pas encore décrit
+    tiles: Optional[tuple[Tile, ...]]  # None si une lettre est inconnue
+    missing: tuple[str, ...]
 
     @property
     def available(self) -> bool:
         return self.tiles is not None
 
 
-def load_catalog(path: str = DATA_FILE) -> dict[str, Tile]:
-    """Catalogue des côtés de tuiles connus : valeurs intégrées + fichier de données (s'il existe)."""
-    catalog = dict(BUILT_IN_CATALOG)
-    if not os.path.exists(path):
-        return catalog
-    with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} : le fichier doit contenir un objet JSON.")
-    for letter, entry in data.items():
-        if letter.startswith("_") or entry is None:
-            continue
-        if len(letter) != 1 or not letter.isalpha():
-            raise ValueError(f"{path} : '{letter}' n'est pas une lettre de tuile.")
-        try:
-            catalog[letter] = Tile(entry["kind"], entry.get("direction"), entry.get("terrain", "." * SQUARES_PER_TILE))
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            raise ValueError(f"{path} : tuile '{letter}' invalide ({exc}).") from exc
-    return catalog
-
-
-def build_stage(name: str, setup: str, catalog: dict[str, Tile]) -> OfficialStage:
+def build_stage(name: str, setup: str, catalog: dict[str, Tile] = OFFICIAL_TILES) -> OfficialStage:
     missing = tuple(dict.fromkeys(letter for letter in setup if letter not in catalog))
     tiles = None if missing else tuple(catalog[letter] for letter in setup)
     return OfficialStage(name, setup, tiles, missing)
 
 
-def official_stages(path: str = DATA_FILE) -> list[OfficialStage]:
-    """Les cartes étape, jouables ou non selon le catalogue."""
-    catalog = load_catalog(path)
-    return [build_stage(name, setup, catalog) for name, setup in STAGES.items()]
-
-
-def template_catalog() -> dict:
-    """Contenu du fichier de données à compléter : une entrée par côté de tuile (a-u, A-U)."""
-    template: dict = {
-        "_aide": "Remplace chaque null par la description du côté de tuile : "
-        '{"kind": "straight|soft|sharp|start|finish", "direction": "L|R|null", "terrain": "......"}. '
-        "Voir flamme_rouge/official.py pour le détail du format."
-    }
-    for letter in "abcdefghijklmnopqrstu":
-        for side in (letter, letter.upper()):
-            built_in = BUILT_IN_CATALOG.get(side)
-            template[side] = (
-                {"kind": built_in.kind, "direction": built_in.direction, "terrain": built_in.terrain} if built_in else None
-            )
-    return template
+def official_stages() -> list[OfficialStage]:
+    return [build_stage(name, setup) for name, setup in STAGES.items()]

@@ -13,5 +13,5 @@ def test_four_base_circuits_with_the_box_composition_and_no_error():
 
 
 def test_base_circuits_are_in_the_menu_and_playable(tmp_path):
-    choices = [c for c in build_choices(str(tmp_path), official_path=str(tmp_path / "x.json")) if c.group == GROUP_BASE]
+    choices = [c for c in build_choices(str(tmp_path)) if c.group == GROUP_BASE]
     assert len(choices) == 4 and all(c.playable for c in choices)

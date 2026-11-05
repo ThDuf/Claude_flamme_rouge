@@ -46,10 +46,15 @@ class Game:
                 rider = Rider(team=team, kind=kind, draw_pile=starting_deck(kind))
                 self.rng.shuffle(rider.draw_pile)
                 self.riders.append(rider)
-        # Placement initial simplifié : 2 coureurs par case de départ.
+        # Placement initial simplifié : 2 coureurs par case, sur la grille de départ en partant
+        # de la ligne (s'il n'y a pas de grille, sur les premières cases du parcours).
         # (Plus tard : laisser chaque joueur choisir son emplacement.)
+        grid = self.track.start
+        if grid and grid * MAX_PER_SQUARE < len(self.riders):
+            raise ValueError(f"La grille de départ n'a que {grid * MAX_PER_SQUARE} places pour {len(self.riders)} coureurs.")
         for i, rider in enumerate(self.riders):
-            rider.position = i // MAX_PER_SQUARE
+            row = i // MAX_PER_SQUARE
+            rider.position = grid - 1 - row if grid else row
             rider.lane = i % MAX_PER_SQUARE
 
     # ------------------------------------------------------------------ outils
