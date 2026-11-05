@@ -217,3 +217,18 @@ def test_profile_during_the_race_places_riders_and_groups():
     assert len(dots) == len(g.riders)
     g.riders[0].position = 45  # au-delà de la ligne d'arrivée
     assert profile_primitives(g.track, 1000, 100, riders=g.riders)
+
+
+def test_relief_shadows_grow_with_altitude_and_slopes_get_chevrons():
+    from flamme_rouge import palette as pal
+    from flamme_rouge.boardview import CHEVRON_DOWN, CHEVRON_UP, map_primitives, road_altitudes
+
+    track = Track("." * 6 + "A" * 4 + "D" * 2 + "." * 6)
+    assert road_altitudes(track, 20)[:12] == [0, 0, 0, 0, 0, 0, 0.5, 1.5, 2.5, 3.5, 3.5, 2.5]
+    g = Game(track, num_teams=2, seed=0)
+    prims = map_primitives(g)
+    shadows = [p for p in prims if p[0] == "poly" and p[2] == pal.SHADOW]
+    assert len(shadows) >= len(track)
+    ups = [p for p in prims if p[0] == "path" and p[2] == CHEVRON_UP]
+    downs = [p for p in prims if p[0] == "path" and p[2] == CHEVRON_DOWN]
+    assert len(ups) == 4 and len(downs) == 2 * 2  # un chevron par case de montée, deux par case de descente
