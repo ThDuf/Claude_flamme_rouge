@@ -5,6 +5,7 @@ from flamme_rouge.catalog import (
     GROUP_MINE,
     GROUP_BASE,
     GROUP_OFFICIAL,
+    GROUP_PELOTON,
     MAX_SAVED_FILES,
     build_choices,
     saved_files,
@@ -19,13 +20,14 @@ def write(path, tiles):
 def test_menu_lists_official_stages_first_then_base_circuits(tmp_path):
     choices = build_choices(str(tmp_path))
     groups = [c.group for c in choices]
-    assert groups == [GROUP_OFFICIAL] * 5 + [GROUP_BASE] * 4  # plus de parcours « prêts à jouer » non officiels
+    assert groups == [GROUP_OFFICIAL] * 6 + [GROUP_PELOTON] * 12 + [GROUP_BASE] * 4
+    assert all(c.playable for c in choices if c.group == GROUP_PELOTON)
     assert choices[0].key == "officiel:Avenue Corso Paseo"
 
 
 def test_official_stages_are_listed_and_playable(tmp_path):
     official = [c for c in build_choices(str(tmp_path)) if c.group == GROUP_OFFICIAL]
-    assert [c.label for c in official][0] == "Avenue Corso Paseo" and len(official) == 5
+    assert [c.label for c in official][0] == "Avenue Corso Paseo" and len(official) == 6
     assert all(c.playable for c in official)
     assert official[0].details.endswith("21 tuiles")
 

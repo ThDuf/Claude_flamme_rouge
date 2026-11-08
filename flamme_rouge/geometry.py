@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from .track import Track
 
-ROAD_WIDTH = 1.4  # largeur de la route (2 couloirs), pour une case de longueur 1
+LANE_WIDTH = 0.7  # largeur d'une file, pour une case de longueur 1
+ROAD_WIDTH = 2 * LANE_WIDTH  # largeur d'une route ordinaire (2 files)
 ARC_STEP_DEGREES = 5  # finesse du dessin des virages : un point tous les 5° le long des bords
 EXTRA_SQUARES = 14  # cases dessinées après la ligne d'arrivée (un coureur peut la dépasser)
 
@@ -37,6 +38,7 @@ class SquareGeom:
     # Vides : bords droits, de lb à lf et de rb à rf.
     left_edge: tuple[Point, ...] = ()
     right_edge: tuple[Point, ...] = ()
+    lanes: int = 2  # nombre de files (1 à 3 avec l'extension Peloton)
 
     @property
     def corners(self) -> list[Point]:
@@ -52,8 +54,14 @@ class SquareGeom:
 
     @property
     def middle_path(self) -> tuple[Point, ...]:
-        """Ligne entre les deux couloirs."""
+        """Ligne au milieu de la route."""
         return tuple(_mid(a, b) for a, b in zip(self.left_path, self.right_path))
+
+    @property
+    def lane_lines(self) -> list[tuple[Point, ...]]:
+        """Traits entre les files : aucun pour une file, un pour deux, deux pour trois."""
+        return [tuple(_lerp(r, l, k / self.lanes) for r, l in zip(self.right_path, self.left_path))
+                for k in range(1, self.lanes)]
 
     @property
     def outline(self) -> list[Point]:
@@ -64,12 +72,10 @@ class SquareGeom:
     def center(self) -> Point:
         return _avg(*self.corners)
 
-    def lane_center(self, lane: int) -> Point:
-        """Centre du couloir : 0 = droite (prioritaire), 1 = gauche."""
-        mb, mf = _mid(self.lb, self.rb), _mid(self.lf, self.rf)
-        if lane == 0:
-            return _avg(self.rb, self.rf, mf, mb)
-        return _avg(mb, mf, self.lf, self.lb)
+    def lane_center(self, lane: float) -> Point:
+        """Centre de la file : 0 = droite (prioritaire), puis vers la gauche (fractionnaire pendant un changement)."""
+        f = (lane + 0.5) / self.lanes
+        return _lerp(_mid(self.rb, self.rf), _mid(self.lb, self.lf), f)
 
 
 def layout_squares(track: Track, extra: int = EXTRA_SQUARES) -> list[SquareGeom]:
@@ -79,49 +85,44 @@ def layout_squares(track: Track, extra: int = EXTRA_SQUARES) -> list[SquareGeom]
     `track.angle(i)` degrés entre le bord arrière et le bord avant de la case (comme les
     cases en éventail d'une tuile de virage). Les bords entre cases sont perpendiculaires à la route."""
     total = len(track) + extra
-    half = ROAD_WIDTH / 2
 
-    edges: list[tuple[Point, Point]] = []
-    heading = 0.0  # direction de la route au bord courant, en radians
-    x = y = 0.0
-
-    def edge() -> tuple[Point, Point]:
-        left = (x - half * math.sin(heading), y + half * math.cos(heading))
-        right = (x + half * math.sin(heading), y - half * math.cos(heading))
-        return left, right
-
-    edges.append(edge())
-    arcs: list[tuple[tuple[Point, ...], tuple[Point, ...]]] = []
+    # ligne médiane : position et direction de la route à chaque bord entre deux cases
+    points: list[tuple[float, float, float]] = [(0.0, 0.0, 0.0)]
     for i in range(total):
+        x, y, heading = points[-1]
         turn = math.radians(track.angle(i))
         if abs(turn) < 1e-9:
-            x += math.cos(heading)
-            y += math.sin(heading)
-            arcs.append(((), ()))
-        else:  # arc de longueur 1 : on avance selon la corde, et on échantillonne les bords le long de l'arc
-            x0, y0, h0 = x, y, heading
+            points.append((x + math.cos(heading), y + math.sin(heading), heading))
+        else:  # arc de longueur 1 : on avance selon la corde
+            chord = 2 * math.sin(turn / 2) / turn
+            points.append((x + chord * math.cos(heading + turn / 2), y + chord * math.sin(heading + turn / 2), heading + turn))
+
+    def side(x: float, y: float, h: float, half: float) -> tuple[Point, Point]:
+        return (x - half * math.sin(h), y + half * math.cos(h)), (x + half * math.sin(h), y - half * math.cos(h))
+
+    squares = []
+    for i in range(total):
+        lanes = track.lanes(i) if i < len(track) else 2
+        half = LANE_WIDTH * lanes / 2  # chaque case a la largeur de ses files
+        (x0, y0, h0), (x1, y1, h1) = points[i], points[i + 1]
+        lb, rb = side(x0, y0, h0, half)
+        lf, rf = side(x1, y1, h1, half)
+        turn = h1 - h0
+        left: tuple[Point, ...] = ()
+        right: tuple[Point, ...] = ()
+        if abs(turn) >= 1e-9:  # bords échantillonnés le long de l'arc, pour un dessin lisse
             steps = max(2, math.ceil(abs(math.degrees(turn)) / ARC_STEP_DEGREES))
-            left, right = [], []
+            ls, rs = [], []
             for k in range(steps + 1):
-                f = k / steps
-                h = h0 + turn * f
-                # point de la ligne médiane après une longueur f d'arc (rayon 1 / turn)
+                h = h0 + turn * k / steps
                 px = x0 + (math.sin(h) - math.sin(h0)) / turn
                 py = y0 - (math.cos(h) - math.cos(h0)) / turn
-                left.append((px - half * math.sin(h), py + half * math.cos(h)))
-                right.append((px + half * math.sin(h), py - half * math.cos(h)))
-            chord = 2 * math.sin(turn / 2) / turn
-            x += chord * math.cos(heading + turn / 2)
-            y += chord * math.sin(heading + turn / 2)
-            arcs.append((tuple(left), tuple(right)))
-        heading += turn
-        edges.append(edge())
-
-    return [
-        SquareGeom(lb=edges[i][0], rb=edges[i][1], rf=edges[i + 1][1], lf=edges[i + 1][0],
-                   left_edge=arcs[i][0], right_edge=arcs[i][1])
-        for i in range(total)
-    ]
+                lp, rp = side(px, py, h, half)
+                ls.append(lp)
+                rs.append(rp)
+            left, right = tuple(ls), tuple(rs)
+        squares.append(SquareGeom(lb=lb, rb=rb, rf=rf, lf=lf, left_edge=left, right_edge=right, lanes=lanes))
+    return squares
 
 
 def start_edge(squares: list[SquareGeom], track: Track) -> tuple[Point, Point]:
@@ -136,7 +137,7 @@ def _lerp(a: Point, b: Point, f: float) -> Point:
 
 def point_on_road(squares: list[SquareGeom], progress: float, lane: float = 0.0) -> Point:
     """Point de la route à la case `progress` (fractionnaire : 3.5 = entre la case 3 et la case 4)
-    et au couloir `lane` (0 = droite, 1 = gauche, entre les deux pendant un changement de couloir).
+    et à la file `lane` (0 = droite, puis vers la gauche ; fractionnaire pendant un changement de file).
     Hors de la route dessinée, la position est ramenée au bout le plus proche."""
     last = len(squares) - 1
     progress = min(max(progress, 0.0), float(last))
@@ -144,7 +145,7 @@ def point_on_road(squares: list[SquareGeom], progress: float, lane: float = 0.0)
     frac = progress - i
 
     def lane_point(sq: SquareGeom) -> Point:
-        return _lerp(sq.lane_center(0), sq.lane_center(1), lane)
+        return sq.lane_center(lane)
 
     here = lane_point(squares[i])
     if last == 0:

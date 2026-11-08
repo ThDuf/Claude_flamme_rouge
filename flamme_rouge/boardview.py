@@ -19,7 +19,7 @@ from .game import Game
 from .geometry import EXTRA_SQUARES, finish_edge, layout_squares, point_on_road
 from .rider import Rider
 from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
-from .track import ASCENT, DESCENT, NORMAL, Track
+from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, NORMAL, SUPPLY, Track
 from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
 
 from . import palette as pal
@@ -244,6 +244,59 @@ def _slope_chevrons(prims: list, squares, square: int, kind: str, tr, width: int
         prims.append(("path", pts, color, width))
 
 
+COBBLE_COLOR, COBBLE_STONE, COBBLE_EDGE = "#8b6f47", "#a8916a", "#5c4630"
+SUPPLY_COLOR = "#14b8a6"
+BREAKAWAY_COLOR = "#d4b84a"  # cases jaunes de la zone d'échappée (tuile 2)
+SURFACE_LABEL = {COBBLES: "PAVÉS", SUPPLY: "RAVITO", BREAKAWAY: "ÉCHAPPÉE"}
+SURFACE_COLOR = {COBBLES: COBBLE_COLOR, SUPPLY: SUPPLY_COLOR, BREAKAWAY: BREAKAWAY_COLOR}
+
+
+def _surface_fill(fill: str, surface: str) -> str:
+    """Pavés : route brune ; ravitaillement : légère teinte turquoise (extension Peloton)."""
+    if surface == COBBLES:
+        return _mix(fill, COBBLE_COLOR, 0.6)
+    if surface == SUPPLY:
+        return _mix(fill, SUPPLY_COLOR, 0.22)
+    if surface == BREAKAWAY:
+        return _mix(fill, BREAKAWAY_COLOR, 0.45)
+    return fill
+
+
+def _cobble_stones(prims: list, sq, tr, scale: float) -> None:
+    """Pavés dessinés sur la case : trois rangées de pierres arrondies."""
+    r = max(1.5, 0.08 * scale)
+    for u in (0.17, 0.5, 0.83):
+        for v in (0.22, 0.5, 0.78):
+            back = _lerp_point(sq.rb, sq.lb, v)
+            front = _lerp_point(sq.rf, sq.lf, v)
+            x, y = tr(_lerp_point(back, front, u))
+            prims.append(("oval", x - r, y - r * 0.8, x + r, y + r * 0.8, COBBLE_STONE, COBBLE_EDGE, 1))
+
+
+def _lerp_point(a, b, f: float):
+    return (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f)
+
+
+def _surface_labels(prims: list, squares, track: Track, indices, tr, scale: float) -> None:
+    """Nom de chaque section pavée ou de ravitaillement, posé le long de la route, côté gauche."""
+    shown = set(indices)
+    s = 0
+    while s < len(track):
+        surface = track.surface(s)
+        if not surface:
+            s += 1
+            continue
+        end = s
+        while end < len(track) and track.surface(end) == surface:
+            end += 1
+        mid = (s + end - 1) // 2
+        if mid in shown:
+            x, y = tr(point_on_road(squares, mid, squares[mid].lanes + 0.9))
+            color = COBBLE_STONE if surface == COBBLES else SURFACE_COLOR[surface]
+            prims.append(("text", x, y, SURFACE_LABEL[surface], color, 8 if scale < 15 else 9, True, "center"))
+        s = end
+
+
 def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
     """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels)."""
     squares = layout_squares(game.track)
@@ -396,12 +449,16 @@ def map_primitives(
         beyond = s >= finish
         kind = None if beyond else track.kind(s)
         fill = _relief_fill(BEYOND_FILL if beyond else TERRAIN_FILL[kind], altitudes[s], top)
-        prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
+        surface = "" if beyond else track.surface(s)
+        prims.append(("poly", flat(sq.outline), _surface_fill(fill, surface), pal.ROAD_OUTLINE, 1))
+        if surface == COBBLES and scale >= 10:
+            _cobble_stones(prims, sq, tr, scale)
         # lignes blanches sur les bords de la route (en arc dans les virages)
         for path in (sq.left_path, sq.right_path):
             prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
-        # trait séparant les deux couloirs
-        prims.append(("path", flat(sq.middle_path), pal.LANE_LINE, 1))
+        # traits entre les files (aucun sur les pavés à une file, deux au ravitaillement)
+        for path in sq.lane_lines:
+            prims.append(("path", flat(path), pal.LANE_LINE, 1))
         cx, cy = tr(sq.center)
         if s % number_every == 0:
             # numéro de case, posé à l'extérieur de la route (côté droit)
@@ -414,6 +471,7 @@ def map_primitives(
         for s in shown:
             if s < finish and track.kind(s) != NORMAL:
                 _slope_chevrons(prims, squares, s, track.kind(s), tr, 3 if scale >= 25 else 2)
+    _surface_labels(prims, squares, track, shown, tr, scale)
     if track.start and first <= track.start <= last:
         _start_line(prims, squares, track.start, tr)
     if first <= finish <= last + 1:
@@ -524,7 +582,10 @@ def _preview(
         beyond = finish_square is not None and s >= finish_square
         kind = track.kind(s)
         fill = _relief_fill(BEYOND_FILL if beyond else TERRAIN_FILL[kind], altitudes[s], top)
-        prims.append(("poly", flat(sq.outline), fill, pal.ROAD_OUTLINE, 1))
+        surface = "" if beyond else track.surface(s)
+        prims.append(("poly", flat(sq.outline), _surface_fill(fill, surface), pal.ROAD_OUTLINE, 1))
+        if surface == COBBLES and scale >= 14:
+            _cobble_stones(prims, sq, tr, scale)
         for path in (sq.left_path, sq.right_path):
             prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
 
@@ -837,6 +898,15 @@ def profile_primitives(
         for zone in weather.effects:  # bande colorée sous l'axe, à l'endroit de chaque panneau
             prims.append(("rect", x_of(zone.start), base + 1, x_of(min(zone.end, n)), base + 5,
                           pal.WEATHER_FILL[zone.effect], "#ffffff", 1))
+    for s in range(n):  # extension Peloton : pavés (brun) et ravitaillement (turquoise) sous l'axe
+        surface = track.surface(s)
+        if surface:
+            color = SURFACE_COLOR[surface]
+            prims.append(("rect", x_of(s), base + 6, x_of(s + 1), base + 9, color, color, 1))
+    if any(track.surface(s) == COBBLES for s in range(n)):
+        title += "  ·  pavés"
+    if any(track.surface(s) == SUPPLY for s in range(n)):
+        title += "  ·  ravitaillement"
     prims.append(("text", PROFILE_PAD_X, 8, title, pal.MUTED, 9, True, "w"))
 
     # badge rouge incliné au sommet de chaque col, avec sa catégorie
@@ -925,4 +995,99 @@ def tile_card_primitives(tile: Tile, width: int, height: int, selected: bool = F
     prims.append(("text", CARD_LETTER_W / 2 + 3, height / 2, tile.letter or "?", letter_color, 13, True, "center"))
     if used:
         prims.append(("text", width - 5, height - 9, "posée", pal.MUTED, 7, False, "e"))
+    return prims
+
+
+# ------------------------------------------------------------------ écran de victoire
+
+PODIUM_COLORS = {1: "#f5c542", 2: "#c0c7d1", 3: "#cd7f32"}  # or, argent, bronze
+PODIUM_HEIGHTS = {1: 0.42, 2: 0.30, 3: 0.22}  # fraction de la hauteur du cadre
+PODIUM_DELAY = {3: 0.0, 2: 0.25, 1: 0.5}  # les marches montent l'une après l'autre : 3e, 2e, puis le vainqueur
+RISE_TIME = 0.7
+DROP_TIME = 0.45
+CONFETTI = 90
+
+
+def _ease(f: float) -> float:
+    """Départ rapide, arrivée en douceur (et un petit rebond à la fin)."""
+    f = max(0.0, min(1.0, f))
+    return 1 - (1 - f) ** 3 + 0.08 * math.sin(f * math.pi) * (1 - f)
+
+
+def race_ranking(game: Game) -> list[Rider]:
+    """Classement de la course : le plus loin d'abord ; à égalité de case, la file de droite devant."""
+    return sorted(game.riders, key=lambda r: (-r.position, r.lane))
+
+
+def podium_primitives(game: Game, width: int, height: int, t: float, team_names: Optional[Sequence[str]] = None) -> list[tuple]:
+    """Écran de victoire à l'instant `t` (en secondes) : les trois marches du podium montent, les coureurs
+    se posent dessus, des confettis aux couleurs des équipes tombent en continu.
+
+    `team_names` : comment nommer chaque équipe (par défaut « Équipe n »)."""
+    ranking = race_ranking(game)
+    names = list(team_names or [f"Équipe {i + 1}" for i in range(max(r.team for r in game.riders) + 1)])
+    prims: list[tuple] = [("rect", 0, 0, width, height, "#0f1a33", "", 0)]
+    for x in range(0, width, 90):  # rayons de lumière derrière le podium
+        prims.append(("poly", [width / 2, height * 0.15, x, height, x + 45, height], "#14213f", "", 0))
+
+    # confettis (derrière le podium et les coureurs)
+    teams = sorted({r.team for r in game.riders})
+    for i in range(CONFETTI):
+        phase = _frac(i * 0.6180339)
+        speed = 0.18 + 0.22 * _frac(i * 0.4142)
+        x = _frac(i * 0.3819 + 0.11) * width + math.sin(t * 2 + i) * 12
+        y = (_frac(t * speed + phase) * 1.2 - 0.1) * height
+        a = t * (2 + 3 * _frac(i * 0.27)) + i
+        size = 4 + 3 * _frac(i * 0.83)
+        color = TEAM_FILL[teams[i % len(teams)]] if i % 3 else "#ffffff"
+        dx, dy = math.cos(a) * size, math.sin(a) * size * 0.5
+        prims.append(("line", x - dx, y - dy, x + dx, y + dy, color, 3))
+
+    base = height - 30
+    block_w = min(150, width / 5)
+    centers = {2: width / 2 - block_w * 1.05, 1: width / 2, 3: width / 2 + block_w * 1.05}
+    for place in (1, 2, 3):
+        if place > len(ranking):
+            continue
+        rider = ranking[place - 1]
+        rise = _ease((t - PODIUM_DELAY[place]) / RISE_TIME)
+        top = base - PODIUM_HEIGHTS[place] * height * rise
+        cx = centers[place]
+        x0, x1 = cx - block_w / 2, cx + block_w / 2
+        color = PODIUM_COLORS[place]
+        prims.append(("rect", x0 + 6, top + 6, x1 + 6, base, "#0a1226", "", 0))  # ombre
+        prims.append(("rect", x0, top, x1, base, color, "#ffffff", 2))
+        if rise > 0.35:
+            prims.append(("text", cx, (top + base) / 2, str(place), "#1f2937", 30 if place == 1 else 24, True, "center"))
+        # le coureur tombe sur sa marche une fois qu'elle est montée
+        land = _ease((t - PODIUM_DELAY[place] - RISE_TIME) / DROP_TIME)
+        if land <= 0:
+            continue
+        radius = 26 if place == 1 else 21
+        ry = -radius + (top - radius - 6 + radius) * land
+        prims.append(("oval", cx - radius, ry - radius, cx + radius, ry + radius, TEAM_FILL[rider.team], "#ffffff", 3))
+        prims.append(("text", cx, ry, rider.name, LABEL_ON_FILL[rider.team], 14 if place == 1 else 12, True, "center"))
+        if land >= 1:
+            label = names[rider.team] if rider.team < len(names) else f"Équipe {rider.team + 1}"
+            label_y = top - 2 * radius - (44 if place == 1 else 22)  # au-dessus de la couronne pour le vainqueur
+            prims.append(("text", cx, label_y, label, TEAM_TEXT[rider.team], 11, True, "center"))
+            if place == 1:  # couronne qui brille au-dessus du vainqueur
+                glow = 0.5 + 0.5 * math.sin(t * 4)
+                gold = _mix("#b8860b", "#fff3b0", glow)
+                ky = ry - radius - 12
+                prims.append(("poly", [cx - 16, ky + 8, cx - 16, ky - 6, cx - 8, ky + 1, cx, ky - 10,
+                                       cx + 8, ky + 1, cx + 16, ky - 6, cx + 16, ky + 8], gold, "#ffffff", 1))
+
+    winner = ranking[0]
+    title_in = _ease((t - PODIUM_DELAY[1] - RISE_TIME - DROP_TIME) / 0.5)
+    if title_in > 0:
+        size = int(16 + 14 * title_in)
+        winner_team = names[winner.team] if winner.team < len(names) else f"Équipe {winner.team + 1}"
+        prims.append(("text", width / 2, 38, "VICTOIRE !", "#ffffff", size, True, "center"))
+        prims.append(("text", width / 2, 72, f"{winner.name} · {winner_team} · {winner.kind}", TEAM_TEXT[winner.team], 13, True, "center"))
+    # le reste du classement, en petit, en bas
+    rest = "   ".join(f"{place}. {r.name}" for place, r in enumerate(ranking[3:], 4))
+    if rest:
+        prims.append(("text", width / 2, height - 12, rest, pal.MUTED, 9, False, "center"))
+    prims.append(("text", width - 10, 14, "clic : voir la course", pal.FAINT, 8, False, "e"))
     return prims

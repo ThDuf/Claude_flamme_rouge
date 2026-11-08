@@ -21,9 +21,10 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
-from flamme_rouge.boardview import profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
+from flamme_rouge.boardview import podium_primitives, profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
+    BREAKAWAY,
     CHOOSE,
     EXHAUSTION,
     FINISHED,
@@ -35,6 +36,7 @@ from flamme_rouge.decks import deck_text
 from flamme_rouge.tiles import load_track_file
 
 PHASE_TITLES = {
+    BREAKAWAY: "enchères de l'échappée",
     CHOOSE: "choix des cartes",
     MOVEMENT: "cartes posées",
     SLIPSTREAM: "mouvement terminé",
@@ -42,13 +44,15 @@ PHASE_TITLES = {
     FINISHED: "partie terminée",
 }
 PHASE_INFO = {
+    BREAKAWAY: "Chaque équipe mise deux cartes d'un coureur, ou passe : le meilleur total part devant.",
     CHOOSE: "Chaque coureur choisit une carte parmi 4. Le coureur entouré d'un halo doré est en train de choisir.",
     MOVEMENT: "Toutes les cartes sont posées. Clique sur le bouton pour les révéler et lancer le mouvement.",
     SLIPSTREAM: "Regarde le plateau, puis lance l'aspiration.",
     EXHAUSTION: "Regarde le plateau, puis passe à la fatigue.",
-    FINISHED: "Retourne au menu pour refaire une partie, ou ferme la fenêtre.",
+    FINISHED: "Clic sur le podium pour revoir la course ; retourne au menu pour refaire une partie.",
 }
 ACTION_TEXT = {
+    BREAKAWAY: "Enchères de l'échappée…",
     CHOOSE: "Choisis les cartes…",
     MOVEMENT: "▶ Révéler les cartes : MOUVEMENT",
     SLIPSTREAM: "▶ ASPIRATION",
@@ -58,17 +62,17 @@ ACTION_TEXT = {
 
 
 PROFILE_H = 100
-WINDOW_W, WINDOW_H = 1040, 930
+WINDOW_W, WINDOW_H = 1040, 985
 
 
 class App:
     def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True,
-                 extensions=()):
+                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False):
         self.parent = root  # conteneur où l'on dessine (la fenêtre, ou un cadre quand on vient du menu)
         self.root = root.winfo_toplevel()  # la fenêtre elle-même : titre, minuteur, fenêtres annexes
         self.root.title("Flamme Rouge")
-        self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions)
-        self.ctl = TurnController(self.game)
+        self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
+        self.ctl = TurnController(self.game, ai_teams, breakaway)  # `ai_teams` : jouées par l'IA
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
         self.animate_var = tk.BooleanVar(value=animate)
@@ -78,6 +82,9 @@ class App:
         self.anim_start = 0.0
         self.anim_job = None
         self.fx_job = None  # animation de la météo sur le profil
+        self.show_podium = True  # à l'arrivée : écran de victoire (un clic sur la carte bascule vers la course)
+        self.podium_start = None
+        self.podium_job = None
         self.fx_start = time.monotonic()
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
@@ -103,7 +110,8 @@ class App:
         self.turn_badge.pack(side="left")
         self.title_label = tk.Label(line, text="", font=ui.font(16, True), bg=pal.PANEL, fg=pal.TEXT)
         self.title_label.pack(side="left", padx=(12, 0))
-        self.info_label = tk.Label(left, text="", font=ui.font(10), bg=pal.PANEL, fg=pal.MUTED, anchor="w")
+        self.info_label = tk.Label(left, text="", font=ui.font(10), bg=pal.PANEL, fg=pal.MUTED, anchor="w",
+                                   justify="left", wraplength=520)  # passe à la ligne : la fenêtre reste à sa largeur
         self.info_label.pack(anchor="w", pady=(4, 0))
         tools = tk.Frame(top, bg=pal.PANEL)
         tools.pack(side="right", padx=18)
@@ -139,6 +147,8 @@ class App:
 
         self.standings_frame = tk.Frame(root, bg=pal.BG)
         self.standings_frame.pack(fill="x", padx=14, pady=(8, 0))
+        self.cards_frame = tk.Frame(root, bg=pal.BG)  # cartes révélées au dernier mouvement
+        self.cards_frame.pack(fill="x", padx=14, pady=(6, 0))
 
         # ----- bas : la main à gauche, l'action et le journal à droite
         bottom = tk.Frame(root, bg=pal.BG)
@@ -154,7 +164,8 @@ class App:
         self.action_btn.pack(fill="x", pady=(0, 8))
         log_frame = tk.Frame(right, bg=pal.BG)
         log_frame.pack(fill="both", expand=True)
-        self.log = tk.Text(log_frame, height=6, wrap="word", state="disabled", font=ui.font(10))
+        # largeur minimale modeste : le journal prend la place qui reste à côté de la main
+        self.log = tk.Text(log_frame, width=40, height=6, wrap="word", state="disabled", font=ui.font(10))
         ui.style_text(self.log)
         self.log.pack(fill="both", expand=True)
         self.log.tag_configure("heading", font=ui.font(10, True), foreground=pal.TEXT, spacing1=6)
@@ -172,6 +183,10 @@ class App:
         nxt = self.ctl.current_rider
         if nxt is None or nxt.kind == ROULEUR:
             self.revealed = False
+        self.refresh()
+
+    def _bid_rider(self, rider) -> None:
+        self.ctl.choose_bid_rider(rider)
         self.refresh()
 
     def on_action(self) -> None:
@@ -239,8 +254,42 @@ class App:
     def on_release(self, _event) -> None:
         moved = self._drag is not None and self._drag[2]
         self._drag = None
-        if not moved:
-            self.skip_animation()
+        if moved:
+            return
+        if self.ctl.phase == FINISHED and self.anim is None:  # podium <-> course
+            self.show_podium = not self.show_podium
+            self._paint_map()
+            return
+        self.skip_animation()
+
+    # ------------------------------------------------------------ écran de victoire
+
+    PODIUM_MS = 33
+
+    def _podium_visible(self) -> bool:
+        return self.ctl.phase == FINISHED and self.anim is None and self.show_podium
+
+    def _team_names(self) -> list[str]:
+        """« Équipe 2 · IA », « Équipe 3 · Peloton »… pour l'écran de victoire."""
+        names = []
+        for team in range(max(r.team for r in self.game.riders) + 1):
+            rider = next(r for r in self.game.riders if r.team == team)
+            who = self.ctl.controller_of(rider)
+            names.append(f"Équipe {team + 1}" + ("" if who == "Joueur" else f" · {who}"))
+        return names
+
+    def _paint_podium(self) -> None:
+        if self.podium_start is None:
+            self.podium_start = time.monotonic()
+        t = time.monotonic() - self.podium_start if self.animate_var.get() is True else 10.0
+        self._paint(self.board, podium_primitives(self.game, BOARD_W, MAP_H, t, self._team_names()))
+        if self.podium_job is None and self.animate_var.get() is True:
+            self.podium_job = self.root.after(self.PODIUM_MS, self._podium_tick)
+
+    def _podium_tick(self) -> None:
+        self.podium_job = None
+        if self.board.winfo_exists() and self._podium_visible():
+            self._paint_podium()
 
     def _tick(self) -> None:
         self.anim_job = None
@@ -280,6 +329,9 @@ class App:
         if self.fx_job is not None:
             self.root.after_cancel(self.fx_job)
             self.fx_job = None
+        if self.podium_job is not None:
+            self.root.after_cancel(self.podium_job)
+            self.podium_job = None
         if self.anim_job is not None:
             self.root.after_cancel(self.anim_job)
             self.anim_job = None
@@ -356,6 +408,7 @@ class App:
         self._paint_map()
         if self.anim is None:  # le classement se met à jour une fois les coureurs arrivés
             self._show_standings()
+        self._show_revealed_cards()
 
         self._show_hand()
         self._refresh_decks()
@@ -366,7 +419,13 @@ class App:
         self._flush_log()
 
     def _paint_map(self) -> None:
-        """Dessine la carte (parcours entier, ou cadrage manuel) ; coureurs en mouvement s'il y a une animation."""
+        """Dessine la carte (parcours entier, ou cadrage manuel) ; coureurs en mouvement s'il y a une animation.
+        À l'arrivée, l'écran de victoire prend la place de la carte."""
+        if self._podium_visible():
+            self._paint_podium()
+            self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
+                                                         weather=self.game.weather))
+            return
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
         shapes = map_primitives(
             self.game,
@@ -389,7 +448,8 @@ class App:
         self.profile.delete("fx")
         ui.paint(self.profile, weather_fx_primitives(self.game.track, self.game.weather, BOARD_W, PROFILE_H, t), tags=("fx",))
         self.board.delete("fx")
-        ui.paint(self.board, map_weather_fx_primitives(self.game, t, view=self.view), tags=("fx",))
+        if not self._podium_visible():
+            ui.paint(self.board, map_weather_fx_primitives(self.game, t, view=self.view), tags=("fx",))
         if self.fx_job is None and self.animate_var.get() is True:
             self.fx_job = self.root.after(self.WEATHER_FX_MS, self._fx_tick)
 
@@ -406,19 +466,60 @@ class App:
         for widget in self.standings_frame.winfo_children():
             widget.destroy()
         order = sorted(self.game.riders, key=lambda r: (-r.position, r.lane))
-        tk.Label(self.standings_frame, text="CLASSEMENT (case)", font=ui.font(8, True), bg=pal.BG, fg=pal.FAINT).pack(side="left", padx=(0, 8))
+        tk.Label(self.standings_frame, text="CLASSEMENT", font=ui.font(8, True), bg=pal.BG, fg=pal.FAINT).pack(side="left", padx=(0, 6))
         for place, rider in enumerate(order, 1):
             chip = tk.Frame(self.standings_frame, bg=pal.CARD, highlightbackground=pal.BORDER, highlightthickness=1)
-            chip.pack(side="left", padx=(0, 5))
-            tk.Label(chip, text=f"{place}", font=ui.font(9, True), bg=pal.CARD, fg=pal.FAINT, padx=5).pack(side="left")
-            tk.Label(chip, text=rider.name, font=ui.font(10, True), bg=pal.TEAM_FILL[rider.team], fg=pal.LABEL_ON_FILL[rider.team], padx=6).pack(side="left", pady=2)
-            tk.Label(chip, text=f"{rider.position}", font=ui.font(9), bg=pal.CARD, fg=pal.MUTED, padx=5).pack(side="left")
+            chip.pack(side="left", padx=(0, 3))
+            tk.Label(chip, text=f"{place}", font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, padx=3).pack(side="left")
+            tk.Label(chip, text=rider.name, font=ui.font(9, True), bg=pal.TEAM_FILL[rider.team], fg=pal.LABEL_ON_FILL[rider.team], padx=4).pack(side="left", pady=2)
+            tk.Label(chip, text=f"{rider.position}", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, padx=3).pack(side="left")
+
+    def _show_revealed_cards(self) -> None:
+        """Les cartes jouées au dernier mouvement par chaque coureur, avec qui le joue (Joueur, IA, Peloton,
+        Muscle). Elles restent affichées pendant le tour suivant, jusqu'au mouvement d'après."""
+        for widget in self.cards_frame.winfo_children():
+            widget.destroy()
+        revealed = self.ctl.last_revealed
+        if not revealed:
+            tk.Label(self.cards_frame, text="CARTES JOUÉES : elles apparaîtront ici au premier mouvement",
+                     font=ui.font(8, True), bg=pal.BG, fg=pal.FAINT).pack(side="left")
+            return
+        tk.Label(self.cards_frame, text=f"CARTES DU TOUR {self.ctl.last_revealed_turn}", font=ui.font(8, True), bg=pal.BG,
+                 fg=pal.FAINT).pack(side="left", padx=(0, 8))
+        teams = sorted({r.team for r in revealed})
+        for team in teams:  # une pastille par équipe : qui la joue, puis la carte de chaque coureur
+            riders = sorted((r for r in revealed if r.team == team), key=lambda r: r.name)
+            who = self.ctl.controller_of(riders[0])
+            chip = tk.Frame(self.cards_frame, bg=pal.CARD, highlightthickness=1,
+                            highlightbackground=pal.ACCENT if who != "Joueur" else pal.BORDER)
+            chip.pack(side="left", padx=(0, 4))
+            tk.Label(chip, text=who.upper(), font=ui.font(7, True), bg=pal.TEAM_FILL[team],
+                     fg=pal.LABEL_ON_FILL[team], padx=3).pack(side="left", fill="y")
+            for rider in riders:
+                card = revealed[rider]
+                short = rider.name[len(str(team + 1)):]  # « R », « S », « P1 »…
+                tk.Label(chip, text=f"{short} {card_label(card)}", font=ui.font(10, True), bg=pal.CARD,
+                         fg=pal.ACCENT if card.special else pal.MUTED if card.exhaustion else pal.TEXT,
+                         padx=3).pack(side="left", pady=1)
 
     def _show_hand(self) -> None:
         for widget in self.hand_frame.winfo_children():
             widget.destroy()
         frame = self.hand_frame
         rider = self.ctl.current_rider
+        if self.ctl.phase == BREAKAWAY and rider is None:  # l'équipe choisit son coureur, ou passe
+            team = self.ctl.bid_team
+            tk.Label(frame, text=f"Échappée · Équipe {team + 1}", font=ui.font(13, True), bg=pal.CARD,
+                     fg=pal.TEAM_TEXT[team]).pack(anchor="w")
+            tk.Label(frame, text="Quel coureur tente l'échappée ? (2 cartes misées, 2 cartes Fatigue s'il part)",
+                     font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(6, 8))
+            row = tk.Frame(frame, bg=pal.CARD)
+            row.pack(anchor="w")
+            for candidate in (r for r in self.game.riders if r.team == team):
+                ui.FlatButton(row, f"{candidate.name} · {candidate.kind}", lambda r=candidate: self._bid_rider(r),
+                              style="primary", size=11).pack(side="left", padx=(0, 6))
+            ui.FlatButton(row, "Ne pas participer", lambda: self._bid_rider(None), size=11, style="ghost").pack(side="left")
+            return
         if rider is None:
             tk.Label(frame, text="Les cartes sont posées.", font=ui.font(12), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w")
             return
@@ -437,8 +538,12 @@ class App:
             ui.FlatButton(frame, f"Équipe {rider.team + 1} prête : afficher ma main", self._reveal, style="primary", size=11).pack(anchor="w")
             return
 
-        ahead = " ".join(terrain_text(self.game, s) for s in range(rider.position + 1, rider.position + 11))
-        tk.Label(frame, text=f"Devant toi :  {ahead}", font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
+        if self.ctl.phase == BREAKAWAY:
+            tk.Label(frame, text=f"Enchère {self.ctl.bid_round} sur 2 : la carte à miser (les autres vont à la défausse)",
+                     font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
+        else:
+            ahead = " ".join(terrain_text(self.game, s) for s in range(rider.position + 1, rider.position + 11))
+            tk.Label(frame, text=f"Devant toi :  {ahead}", font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
         row = tk.Frame(frame, bg=pal.CARD)
         row.pack(anchor="w")
         for card in sorted(self.ctl.hand, key=lambda c: c.value):
@@ -464,6 +569,13 @@ class App:
             self.log.insert("end", line.text + "\n", tag)
         self.log.configure(state="disabled")
         self.log.see("end")
+
+
+def card_label(card) -> str:
+    """Texte court d'une carte : « 5 », « 2F » (fatigue), « 5M » (Muscle), « A 2/9 » (Attaque)."""
+    if card.special == "attaque":
+        return "A 2/9"
+    return str(card)
 
 
 def main() -> None:

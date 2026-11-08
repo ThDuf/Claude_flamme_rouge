@@ -41,9 +41,15 @@ def test_menu_then_a_whole_game_then_back(root):
     menu.extension_vars["meteo"].set(True)
     menu._refresh_extensions()
     assert "pluie" in menu.extensions_hint.cget("text")  # règles Météo programmées
+    menu.on_launch()  # ouvre l'écran « Qui joue ? »
+    assert launcher.app is None and menu.players_frame is not None
+    assert menu.ai_teams() == frozenset({1, 2})  # par défaut : équipe 1 jouée par un joueur, les autres par l'IA
+    menu.hide_players()  # retour au menu, puis on revient
     menu.on_launch()
+    menu.on_players_start()
     app = launcher.app
     assert len(app.game.riders) == 6
+    assert app.ctl.ai_teams == frozenset({1, 2})
     assert app.game.extensions == frozenset({"meteo"})
     turns = 0
     while app.ctl.phase != FINISHED and turns < 100:
@@ -54,6 +60,13 @@ def test_menu_then_a_whole_game_then_back(root):
             app.skip_animation()
         turns += 1
     assert app.ctl.phase == FINISHED
+    assert app._podium_visible()  # écran de victoire à la place de la carte
+    app._paint_map()
+    app.on_release(None)  # un clic : retour à la course
+    assert not app._podium_visible()
+    app.on_release(None)  # un autre : de nouveau le podium
+    assert app._podium_visible()
+    app.on_release(None)
     app.zoom_at(2.0)
     app.zoom_at(1.5, 300, 200)
     app.reset_view()

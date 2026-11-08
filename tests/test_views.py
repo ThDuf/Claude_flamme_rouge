@@ -232,3 +232,25 @@ def test_relief_shadows_grow_with_altitude_and_slopes_get_chevrons():
     ups = [p for p in prims if p[0] == "path" and p[2] == CHEVRON_UP]
     downs = [p for p in prims if p[0] == "path" and p[2] == CHEVRON_DOWN]
     assert len(ups) == 4 and len(downs) == 2 * 2  # un chevron par case de montée, deux par case de descente
+
+
+def test_victory_podium_animation():
+    from flamme_rouge.boardview import PODIUM_COLORS, podium_primitives, race_ranking
+
+    g = Game(seed=1)
+    while not g.finished:
+        g.play_turn()
+    ranking = race_ranking(g)
+    assert ranking[0] is g.winner
+    start, end = podium_primitives(g, 1000, 430, 0.0), podium_primitives(g, 1000, 430, 4.0)
+    blocks = lambda prims: {p[5]: p for p in prims if p[0] == "rect" and p[5] in PODIUM_COLORS.values()}
+    assert blocks(start)[PODIUM_COLORS[1]][2] == blocks(start)[PODIUM_COLORS[1]][4]  # au début, les marches sont à plat
+    gold, silver, bronze = (blocks(end)[PODIUM_COLORS[k]] for k in (1, 2, 3))
+    assert gold[2] < silver[2] < bronze[2]  # à la fin : la plus haute marche pour le vainqueur
+    assert silver[1] < gold[1] < bronze[1]  # 2e à gauche, 1er au milieu, 3e à droite
+    texts = [p[3] for p in end if p[0] == "text"]
+    assert "VICTOIRE !" in texts and ranking[0].name in texts and "VICTOIRE !" not in [p[3] for p in start if p[0] == "text"]
+    names = podium_primitives(g, 1000, 430, 4.0, ["Équipe 1", "Équipe 2 · IA"])
+    assert any(p[0] == "text" and "Équipe 2 · IA" in p[3] for p in names) or ranking[0].team == 0
+    confetti = lambda prims: [p for p in prims if p[0] == "line" and p[6] == 3]
+    assert len(confetti(start)) == 90 and confetti(start) != confetti(podium_primitives(g, 1000, 430, 0.1))

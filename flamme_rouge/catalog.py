@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
 from .circuits import base_circuits
-from .official import official_stages
+from .official import official_stages, peloton_stages
 from .paths import PARCOURS_DIR
 from .tiles import ERROR, Tile, plan_from_json, plan_to_track, validate
 from .track import Track
 
 GROUP_BASE = "Circuits de base"
 GROUP_OFFICIAL = "Parcours officiels"
+GROUP_PELOTON = "Extension Peloton"
 GROUP_MINE = "Mes parcours"
 
 MAX_SAVED_FILES = 12  # le menu ne liste que les plus récents ; « Ouvrir un fichier » donne accès aux autres
@@ -68,14 +69,16 @@ def build_choices(
     parcours_dir: str = PARCOURS_DIR,
     extra_files: Iterable[str] = (),
 ) -> list[Choice]:
-    """Les parcours du menu : les étapes officielles d'abord, puis les circuits de base et les parcours enregistrés."""
+    """Les parcours du menu : les étapes officielles, celles de l'extension Peloton, puis les circuits de base
+    et les parcours enregistrés."""
     choices: list[Choice] = []
-    for stage in official_stages():
-        if stage.available:
-            choices.append(choice_from_tiles(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, stage.tiles))
-        else:
-            problem = f"Tuiles inconnues : {', '.join(stage.missing)}."
-            choices.append(Choice(f"officiel:{stage.name}", stage.name, GROUP_OFFICIAL, problem=problem))
+    for stages, prefix, group in ((official_stages(), "officiel", GROUP_OFFICIAL), (peloton_stages(), "peloton", GROUP_PELOTON)):
+        for stage in stages:
+            if stage.available:
+                choices.append(choice_from_tiles(f"{prefix}:{stage.name}", stage.name, group, stage.tiles))
+            else:
+                problem = f"Tuiles inconnues : {', '.join(stage.missing)}."
+                choices.append(Choice(f"{prefix}:{stage.name}", stage.name, group, problem=problem))
     for name, description, tiles in base_circuits():
         choices.append(choice_from_tiles(f"base:{name}", name, GROUP_BASE, tiles))
 

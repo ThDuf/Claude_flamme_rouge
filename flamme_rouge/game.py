@@ -5,16 +5,37 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional, Sequence
 
-from .cards import ROULEUR, SPRINTEUR, Card, exhaustion_card, starting_deck
-from .extensions import METEO, check_extensions
+from .cards import (
+    ATTACK,
+    ATTACK_FRONT,
+    ATTACK_REAR,
+    ROULEUR,
+    SPRINTEUR,
+    Card,
+    attack_card,
+    exhaustion_card,
+    muscle_card,
+    starting_deck,
+)
+from .extensions import METEO, PELOTON, check_extensions
 from .rider import Rider
-from .track import ASCENT, DESCENT, Track
+from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, SUPPLY, Track
 from .weather import Weather, WeatherZone, draw_weather
 
 HAND_SIZE = 4
 MOUNTAIN_SPEED = 5  # plafond en montée ET minimum en descente
-MAX_PER_SQUARE = 2  # 2 couloirs par case
+SUPPLY_SPEED = 4  # extension Peloton : minimum quand on part d'une zone de ravitaillement
+MAX_PER_SQUARE = 2  # files d'une case ordinaire (voir Track.lanes pour les autres)
 CRASH_PENALTY = 2  # extension Météo : un coureur qui se relève avance de 2 cases de moins
+BASE_MAX_TEAMS, PELOTON_MAX_TEAMS = 4, 6
+BID_ROUNDS = 2  # variante Échappée : deux enchères par coureur
+BREAKAWAY_FATIGUE = 2  # cartes Fatigue prises par chaque échappé
+
+# Qui joue une équipe (l'IA, elle, joue avec les règles d'un joueur : voir controller.py)
+TEAM_PLAYER = "joueur"
+TEAM_PELOTON = "peloton"  # extension Peloton : équipe fantôme à un seul paquet (+ 2 cartes Attaque)
+TEAM_MUSCLE = "muscle"  # extension Peloton : équipe fantôme qui retourne la carte du dessus
+GHOSTS = (TEAM_PELOTON, TEAM_MUSCLE)
 
 # Un "chooser" choisit la carte à jouer parmi la main. C'est le point d'entrée
 # pour brancher plus tard une interface humaine ou une IA.
@@ -42,11 +63,23 @@ class Game:
         seed: Optional[int] = None,
         extensions: Iterable[str] = (),
         weather: Optional[Sequence[WeatherZone]] = None,
+        team_types: Optional[Sequence[str]] = None,
     ):
-        """`weather` impose la météo (sinon, avec l'extension Météo, elle est tirée au hasard)."""
-        if not 2 <= num_teams <= 4:
-            raise ValueError("Le jeu de base se joue de 2 à 4 équipes.")
-        self.extensions = check_extensions(extensions)  # extensions activées (leurs règles viendront ensuite)
+        """`weather` impose la météo (sinon, avec l'extension Météo, elle est tirée au hasard).
+        `team_types` : pour chaque équipe, TEAM_PLAYER (défaut), TEAM_PELOTON ou TEAM_MUSCLE (extension Peloton)."""
+        self.extensions = check_extensions(extensions)
+        max_teams = PELOTON_MAX_TEAMS if PELOTON in self.extensions else BASE_MAX_TEAMS
+        if not 2 <= num_teams <= max_teams:
+            if num_teams <= PELOTON_MAX_TEAMS and max_teams == BASE_MAX_TEAMS:
+                raise ValueError("Le jeu de base se joue de 2 à 4 équipes (5 et 6 avec l'extension Peloton).")
+            raise ValueError(f"On joue de 2 à {max_teams} équipes.")
+        self.team_types = list(team_types or [TEAM_PLAYER] * num_teams)
+        if len(self.team_types) != num_teams or any(t not in (TEAM_PLAYER, *GHOSTS) for t in self.team_types):
+            raise ValueError("Il faut un type (joueur, peloton ou muscle) par équipe.")
+        if any(t in GHOSTS for t in self.team_types) and PELOTON not in self.extensions:
+            raise ValueError("Les équipes Peloton et Muscle viennent de l'extension Peloton.")
+        if self.team_types.count(TEAM_PELOTON) > 1:
+            raise ValueError("Il ne peut y avoir qu'une équipe Peloton.")
         self.track = track or Track()
         self.rng = random.Random(seed)
         self.turn = 0
@@ -54,31 +87,138 @@ class Game:
         self.winner: Optional[Rider] = None
 
         self.riders: list[Rider] = []
-        for team in range(num_teams):
+        self.peloton_pile: list[Card] = []  # paquet commun de l'équipe Peloton
+        self.peloton_discard: list[Card] = []
+        for team, kind_of_team in enumerate(self.team_types):
             for kind in (ROULEUR, SPRINTEUR):
-                rider = Rider(team=team, kind=kind, draw_pile=starting_deck(kind))
-                self.rng.shuffle(rider.draw_pile)
+                if kind_of_team == TEAM_PELOTON:  # deux rouleurs, un seul paquet (ci-dessous)
+                    rider = Rider(team=team, kind=ROULEUR, label=f"{team + 1}P{1 if kind == ROULEUR else 2}")
+                else:
+                    deck = starting_deck(kind)
+                    if kind_of_team == TEAM_MUSCLE and kind == SPRINTEUR:
+                        deck.append(muscle_card())
+                    rider = Rider(team=team, kind=kind, draw_pile=deck)
+                    self.rng.shuffle(rider.draw_pile)
                 self.riders.append(rider)
-        # Placement initial simplifié : 2 coureurs par case, sur la grille de départ en partant
-        # de la ligne (s'il n'y a pas de grille, sur les premières cases du parcours).
-        # (Plus tard : laisser chaque joueur choisir son emplacement.)
-        grid = self.track.start
-        if grid and grid * MAX_PER_SQUARE < len(self.riders):
-            raise ValueError(f"La grille de départ n'a que {grid * MAX_PER_SQUARE} places pour {len(self.riders)} coureurs.")
-        for i, rider in enumerate(self.riders):
-            row = i // MAX_PER_SQUARE
-            rider.position = grid - 1 - row if grid else row
-            rider.lane = i % MAX_PER_SQUARE
+            if kind_of_team == TEAM_PELOTON:
+                self.peloton_pile = starting_deck(ROULEUR) + [attack_card(), attack_card()]
+                self.rng.shuffle(self.peloton_pile)
+        self._place_riders()
         if weather is None:
             weather = draw_weather(self.track, self.rng) if METEO in self.extensions else ()
         self.weather = Weather(weather)
         self.crashed_this_turn: list[Rider] = []  # chutes du dernier mouvement
         self.stood_up_this_turn: list[Rider] = []  # coureurs qui se sont relevés au dernier mouvement
+        self.last_values: dict[Rider, int] = {}  # valeur jouée par chaque coureur au dernier mouvement
+        self._peloton_card: Optional[Card] = None  # carte du Peloton pour le tour en cours
+
+    # --------------------------------------------------------------- mise en place
+
+    def _place_riders(self) -> None:
+        """Placement au départ : les places les plus proches de la ligne d'abord (case par case, file de droite
+        d'abord). Les équipes fantômes se placent avant les joueurs : le Peloton l'un devant l'autre, puis
+        Muscle (Sprinteur devant le Rouleur). Sans grille de départ, on remplit les premières cases du parcours.
+
+        Si la grille ne suffit pas (5–6 équipes), ses cases reçoivent une 3e file (choix faute de règle)."""
+        grid = self.track.start
+        if grid:
+            capacity = sum(self.track.lanes(s) for s in range(grid))
+            if capacity < len(self.riders):
+                lanes = [max(self.track.lanes(s), 3) if s < grid else self.track.lanes(s) for s in range(len(self.track))]
+                self.track = self.track.with_lanes(lanes)
+                capacity = sum(self.track.lanes(s) for s in range(grid))
+            if capacity < len(self.riders):
+                raise ValueError(f"La grille de départ n'a que {capacity} places pour {len(self.riders)} coureurs.")
+            squares = list(range(grid - 1, -1, -1))
+        else:
+            squares = list(range(len(self.track)))
+        slots = [(s, lane) for s in squares for lane in range(self.track.lanes(s))]
+        taken: set[tuple[int, int]] = set()
+
+        def put(rider: Rider, slot: tuple[int, int]) -> None:
+            rider.position, rider.lane = slot
+            taken.add(slot)
+
+        def free() -> list[tuple[int, int]]:
+            return [s for s in slots if s not in taken]
+
+        peloton = [r for r in self.riders if self.team_types[r.team] == TEAM_PELOTON]
+        if peloton:  # l'un devant l'autre, dans la file de droite, au plus près de la ligne
+            column = [s for s in free() if s[1] == 0]
+            for rider, slot in zip(peloton, column):
+                put(rider, slot)
+        for team, kind_of_team in enumerate(self.team_types):
+            if kind_of_team == TEAM_MUSCLE:
+                pair = sorted((r for r in self.riders if r.team == team), key=lambda r: r.kind != SPRINTEUR)
+                for rider in pair:
+                    put(rider, free()[0])
+        for rider in self.riders:
+            if self.team_types[rider.team] == TEAM_PLAYER:
+                put(rider, free()[0])
 
     # ------------------------------------------------------------------ outils
 
     def riders_at(self, square: int, exclude: Optional[Rider] = None) -> list[Rider]:
         return [r for r in self.riders if r.position == square and r is not exclude]
+
+    def lanes(self, square: int) -> int:
+        """Files de la case (2, ou de 1 à 3 avec l'extension Peloton)."""
+        return self.track.lanes(square)
+
+    def team_type(self, rider: Rider) -> str:
+        return self.team_types[rider.team]
+
+    def is_ghost(self, rider: Rider) -> bool:
+        """Coureur d'une équipe fantôme (Peloton ou Muscle) : il retourne une carte, sans choisir."""
+        return self.team_types[rider.team] in GHOSTS
+
+    # ------------------------------------------------- 0. Variante Échappée (extension Peloton)
+
+    def breakaway_squares(self) -> list[int]:
+        """Cases de la zone d'échappée (tuile 2), de l'avant vers l'arrière ; vide sans tuile Échappée."""
+        return sorted((s for s in range(len(self.track)) if self.track.surface(s) == BREAKAWAY), reverse=True)
+
+    def breakaway_winners_count(self) -> int:
+        """Un échappé de 2 à 4 équipes, deux à 5–6 équipes."""
+        return 2 if len(self.team_types) >= 5 else 1
+
+    def draw_bid_hand(self, rider: Rider) -> list[Card]:
+        """Enchère : 4 cartes du paquet du coureur choisi (les autres retourneront à la défausse)."""
+        hand = rider.draw_hand(HAND_SIZE, self.rng)
+        rider.hand = list(hand)
+        return hand
+
+    def put_bid(self, rider: Rider, hand: list[Card], card: Card) -> Card:
+        """Pose la carte misée (mise de côté) et défausse les autres cartes de la main."""
+        if card not in hand:
+            raise ValueError(f"{card} n'est pas dans la main de {rider.name} : {hand}")
+        rest = list(hand)
+        rest.remove(card)
+        rider.recycle.extend(rest)
+        rider.hand = []
+        return card
+
+    def resolve_breakaway(self, bids: dict[Rider, list[Card]]) -> list[Rider]:
+        """Fin des enchères : le ou les meilleurs totaux partent dans la zone d'échappée (le plus haut à droite).
+        Égalité : le coureur le plus en arrière, puis le plus à gauche, l'emporte.
+
+        Les échappés retirent leurs cartes misées du jeu et prennent 2 cartes Fatigue dans leur défausse ; les
+        autres défaussent leurs mises. Puis le paquet de chaque enchérisseur est remélangé avec sa défausse."""
+        ranked = sorted(bids, key=lambda r: (-sum(c.value for c in bids[r]), r.position, -r.lane))
+        winners = ranked[: self.breakaway_winners_count()] if self.breakaway_squares() else []
+        for rider, cards in bids.items():
+            if rider in winners:
+                rider.used.extend(cards)
+                rider.recycle.extend(exhaustion_card() for _ in range(BREAKAWAY_FATIGUE))
+            else:
+                rider.recycle.extend(cards)
+            rider.draw_pile.extend(rider.recycle)
+            rider.recycle = []
+            self.rng.shuffle(rider.draw_pile)
+        slots = [(s, lane) for s in self.breakaway_squares() for lane in range(self.lanes(s))]
+        for rider, (square, lane) in zip(winners, slots):
+            rider.position, rider.lane = square, lane
+        return winners
 
     # ------------------------------------------------------------- 1. Énergie
 
@@ -87,15 +227,44 @@ class Game:
 
         Pour chaque équipe, on traite le rouleur puis le sprinteur (les règles
         autorisent l'ordre inverse : à ajouter plus tard). On ne pioche pour le
-        2e coureur qu'après avoir choisi la carte du 1er.
+        2e coureur qu'après avoir choisi la carte du 1er. Les équipes fantômes retournent leur carte.
         """
         chooser = chooser or random_chooser
         played: dict[Rider, Card] = {}
+        self.new_turn_cards()
         for rider in self.riders:
+            if self.is_ghost(rider):
+                played[rider] = self.ghost_card(rider)
+                continue
             hand = self.draw_hand_for(rider)
             card = chooser(self, rider, hand) if hand else None
             played[rider] = self.play_from_hand(rider, hand, card)
         return played
+
+    def new_turn_cards(self) -> None:
+        """Début de la phase Énergie : l'équipe Peloton retournera une nouvelle carte."""
+        self._peloton_card = None
+
+    def ghost_card(self, rider: Rider) -> Card:
+        """Carte d'un coureur fantôme : la carte du dessus de son paquet (une seule pour toute l'équipe Peloton).
+
+        Paquet vide : on remélange les cartes déjà retournées (la règle ne dit rien ; choix pour finir la course)."""
+        if self.team_type(rider) == TEAM_PELOTON:
+            if self._peloton_card is None:
+                if not self.peloton_pile:
+                    self.peloton_pile, self.peloton_discard = self.peloton_discard, []
+                    self.rng.shuffle(self.peloton_pile)
+                self._peloton_card = self.peloton_pile.pop()
+                self.peloton_discard.append(self._peloton_card)
+            rider.hand = []
+            return self._peloton_card
+        if not rider.draw_pile:
+            rider.draw_pile, rider.recycle = rider.recycle, []
+            self.rng.shuffle(rider.draw_pile)
+        card = rider.draw_pile.pop()
+        rider.recycle.append(card)
+        rider.hand = []
+        return card
 
     def hand_size(self, rider: Rider) -> int:
         """4 cartes ; 5 ou 3 si le coureur commence le tour dans un vent arrière ou de face (Météo)."""
@@ -129,9 +298,11 @@ class Game:
     # ------------------------------------------------------------ 2. Mouvement
 
     def _effective_value(self, start: int, value: int, crashed: bool = False) -> int:
-        """Applique les règles de descente (minimum 5), de relève après une chute (−2), puis de montée (maximum 5)."""
+        """Descente (minimum 5), ravitaillement (minimum 4), relève après une chute (−2), puis montée (maximum 5)."""
         if self.track.kind(start) == DESCENT:
             value = max(value, MOUNTAIN_SPEED)
+        if self.track.surface(start) == SUPPLY:
+            value = max(value, SUPPLY_SPEED)
         if crashed:
             value = max(value - CRASH_PENALTY, 0)
         # Montée : plafond de 5 si on démarre sur, entre dans, ou traverse une case de montée.
@@ -139,27 +310,51 @@ class Game:
             value = min(value, MOUNTAIN_SPEED)
         return value
 
+    def is_full(self, square: int, exclude: Optional[Rider] = None) -> bool:
+        return len(self.riders_at(square, exclude=exclude)) >= self.lanes(square)
+
     def is_blocked(self, square: int, exclude: Optional[Rider] = None) -> bool:
         """Case barrée par une chute : toutes ses files ont un coureur à terre (extension Météo)."""
         here = self.riders_at(square, exclude=exclude)
-        return len(here) >= MAX_PER_SQUARE and all(r.crashed for r in here)
+        return len(here) >= self.lanes(square) and all(r.crashed for r in here)
 
-    def _move(self, rider: Rider, card: Card) -> None:
+    def _free_lane(self, square: int, exclude: Optional[Rider] = None) -> int:
+        """La file libre la plus à droite (0 = droite) de la case."""
+        used = {r.lane for r in self.riders_at(square, exclude=exclude)}
+        return next((lane for lane in range(self.lanes(square)) if lane not in used), 0)
+
+    def card_values(self, played: dict[Rider, Card]) -> dict[Rider, int]:
+        """Valeur de la carte de chaque coureur. Carte Attaque (équipe Peloton) : le coureur de tête
+        de l'équipe avance de 2, celui de derrière de 9."""
+        values = {r: c.value for r, c in played.items()}
+        for team, kind_of_team in enumerate(self.team_types):
+            if kind_of_team != TEAM_PELOTON:
+                continue
+            pair = [r for r in played if r.team == team]
+            if pair and played[pair[0]].special == ATTACK:
+                pair.sort(key=lambda r: (-r.position, r.lane))
+                values[pair[0]] = ATTACK_FRONT
+                for rear in pair[1:]:
+                    values[rear] = ATTACK_REAR
+        return values
+
+    def _move(self, rider: Rider, value: int) -> None:
         start = rider.position
         was_crashed = rider.crashed
         rider.crashed = False  # un coureur à terre se relève au moment de son mouvement
         if was_crashed:
             self.stood_up_this_turn.append(rider)
-        wanted = start + self._effective_value(start, card.value, was_crashed)
+        wanted = start + self._effective_value(start, value, was_crashed)
         # Une case barrée par une chute ne se traverse pas : on s'arrête avant.
         target = next((s - 1 for s in range(start + 1, wanted + 1) if self.is_blocked(s, exclude=rider)), wanted)
         # On peut traverser une case pleine mais pas s'y arrêter : on recule
         # jusqu'à la première case avec de la place (au pire, sa case de départ).
-        while target > start and len(self.riders_at(target, exclude=rider)) >= MAX_PER_SQUARE:
+        while target > start and self.is_full(target, exclude=rider):
             target -= 1
-        others = self.riders_at(target, exclude=rider)
+        rider.lane = self._free_lane(target, exclude=rider) if target != start else rider.lane
         rider.position = target
-        rider.lane = 0 if not any(o.lane == 0 for o in others) else 1
+        if target == start:  # resté sur place (ou relevé sans avancer) : file de droite si elle est libre
+            rider.lane = self._free_lane(start, exclude=rider)
         # Pluie : bloqué par d'autres coureurs et arrêté sous la pluie -> chute.
         if target < wanted and self.weather.is_rain(target):
             rider.crashed = True
@@ -169,8 +364,9 @@ class Game:
         """Les coureurs avancent un par un, du premier au dernier."""
         order = sorted(self.riders, key=lambda r: (-r.position, r.lane))
         self.crashed_this_turn, self.stood_up_this_turn = [], []
+        self.last_values = self.card_values(played)
         for rider in order:
-            self._move(rider, played[rider])
+            self._move(rider, self.last_values[rider])
 
     # ---------------------------------------------------------------- 3. Fin
 
@@ -194,6 +390,8 @@ class Game:
 
         Hypothèse à vérifier : si la case vide visée est elle-même une montée, le pack n'aspire pas.
         Extension Météo : pareil pour une case de vent de travers ou une case avec un coureur à terre.
+        Extension Peloton : pareil sur les pavés ; et si la case de devant a moins de files (sortie d'une
+        zone de ravitaillement), les coureurs des files de droite avancent d'abord, les autres restent.
         """
         moved: list[Rider] = []
         while True:
@@ -210,23 +408,34 @@ class Game:
                 to_shift.update(rear)
             if not to_shift:
                 return moved
-            for rider in self.riders:
-                if rider.position in to_shift:
-                    rider.position += 1
+            shifted = False
+            for square in sorted(to_shift, reverse=True):  # de l'avant vers l'arrière
+                for rider in sorted(self.riders_at(square), key=lambda r: r.lane):  # file de droite d'abord
+                    if self.is_full(square + 1):
+                        continue
+                    rider.lane = self._free_lane(square + 1)
+                    rider.position = square + 1
+                    shifted = True
                     if rider not in moved:
                         moved.append(rider)
+                for stayer in sorted(self.riders_at(square), key=lambda r: r.lane):  # ceux restés : vers la droite
+                    stayer.lane = self._free_lane(square, exclude=stayer)
+            if not shifted:
+                return moved
 
     def no_slipstream(self, square: int) -> bool:
-        """Une case qui ne donne ni ne reçoit d'aspiration : montée, vent de travers, coureur à terre."""
+        """Une case qui ne donne ni ne reçoit d'aspiration : montée, pavés, vent de travers, coureur à terre."""
         return (
             self.track.kind(square) == ASCENT
+            or self.track.surface(square) == COBBLES
             or self.weather.blocks_slipstream(square)
             or any(r.crashed for r in self.riders_at(square))
         )
 
     def apply_exhaustion(self) -> list[Rider]:
-        """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2)."""
-        exhausted = [r for r in self.riders if not self.riders_at(r.position + 1)]
+        """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2).
+        Les équipes fantômes (Peloton, Muscle) n'en prennent jamais."""
+        exhausted = [r for r in self.riders if not self.riders_at(r.position + 1) and not self.is_ghost(r)]
         for rider in exhausted:
             rider.recycle.append(exhaustion_card())
         return exhausted
