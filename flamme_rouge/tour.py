@@ -113,7 +113,24 @@ class Tour:
             self.names = {game.rider_key(r): r.name for r in game.riders}
         holders = {k: jersey for jersey, k in self.jerseys.items()}
         game.jerseys = {r: holders[game.rider_key(r)] for r in game.riders if game.rider_key(r) in holders}
+        game.tour_standings = self.standings_for(game)
         return game
+
+    def standings_for(self, game: Game) -> dict:
+        """Ce que la partie affiche du Tour avant l'étape : qui porte quel maillot (et pourquoi), et le haut du
+        classement général. Les coureurs sont ceux de `game`."""
+        rider_of = {game.rider_key(r): r for r in game.all_riders}
+        details = {
+            YELLOW: lambda k: f"{self.time_text(k)} au général",
+            GREEN: lambda k: f"{self.sprint.get(k, 0)} pts Sprint",
+            POLKA: lambda k: f"{self.mountain.get(k, 0)} pts Montagne",
+        }
+        jerseys = [(j, rider_of[k], details[j](k)) for j, k in self.jerseys.items() if k in rider_of]
+        gc = self.gc_order()
+        leader = self.total_time[gc[0]] if gc else 0
+        top = [(rider_of[k], self.time_text(k), "" if i == 0 else "+" + format_time(self.total_time[k] - leader))
+               for i, k in enumerate(gc[:5]) if k in rider_of]
+        return {"jerseys": jerseys, "gc": top, "stage": len(self.results) + 1, "stages": len(self.stages)}
 
     def finish_stage(self, game: Game) -> StageResult:
         """Étape terminée : temps, points, podium, paquets (moitié de la fatigue rendue), maillots, jour de repos."""

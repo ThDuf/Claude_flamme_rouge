@@ -131,6 +131,7 @@ class Game:
         self.jerseys: dict[Rider, str] = {}  # Grand Tour : maillot porté (jaune, vert, pois), posé par le Tour
         self.token_log: list[TokenWin] = []  # jetons Majeur/Mineur gagnés, dans l'ordre, avec leur raison
         self.arrival_log: dict[Rider, Arrival] = {}  # arrivée de chaque coureur : secondes, minutes, groupe
+        self.tour_standings: dict = {}  # posé par le Tour : maillots et haut du général avant l'étape
         self.last_tokens: list[tuple[Rider, TokenStack, int]] = []  # jetons pris au dernier tour
         self.last_arrivals: list[Rider] = []  # coureurs arrivés au dernier tour
         self.turn_start: dict[Rider, int] = {r: r.position for r in self.riders}

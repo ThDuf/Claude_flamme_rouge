@@ -248,6 +248,21 @@ def test_follow_camera_frames_the_head_or_the_peloton():
     assert follow_window(g, FOLLOW_HEAD) is None
 
 
+def test_stage_knows_the_jerseys_and_the_general_classification():
+    tour = make_tour()
+    first = tour.start_stage()
+    assert first.tour_standings["jerseys"] == [] and first.tour_standings["stage"] == 1
+    tour = make_tour()
+    run_stage(tour)
+    g = tour.start_stage()
+    info = g.tour_standings
+    assert info["stage"] == 2 and info["stages"] == 3
+    leader = tour.gc_order()[0]
+    yellow = next((r, d) for j, r, d in info["jerseys"] if j == YELLOW)
+    assert g.rider_key(yellow[0]) == leader and yellow[1] == f"{tour.time_text(leader)} au général"
+    assert [g.rider_key(r) for r, _t, _gap in info["gc"]] == tour.gc_order()[:5] and info["gc"][0][2] == ""
+
+
 def test_jersey_holders_wear_them_on_the_next_stage():
     from flamme_rouge.boardview import JERSEY_RING, JERSEY_YELLOW, map_primitives, profile_primitives
 
