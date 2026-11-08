@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox
 import ui
 from flamme_rouge import palette as pal
 from flamme_rouge.boardview import profile_primitives, track_preview_primitives
-from flamme_rouge.extensions import EXTENSIONS, PELOTON, READY
+from flamme_rouge.extensions import EXTENSIONS, GRAND_TOUR, PELOTON, READY
 from flamme_rouge.game import TEAM_MUSCLE, TEAM_PELOTON, TEAM_PLAYER
 from flamme_rouge.track import BREAKAWAY
 from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, GROUP_PELOTON, Choice, build_choices
@@ -66,7 +66,7 @@ class ChoiceRow(tk.Frame):
 
 
 class MenuScreen:
-    def __init__(self, parent, on_start):
+    def __init__(self, parent, on_start, on_start_tour=None):
         """`on_start(track, teams, secret, animate, extensions, ai_teams, team_types, breakaway)` lance la course."""
         self.parent = parent
         self.root = parent.winfo_toplevel()
@@ -75,6 +75,11 @@ class MenuScreen:
         ui.place_window(self.root, WINDOW_W, WINDOW_H)
         parent.configure(bg=pal.BG)
         self.on_start = on_start
+        self.on_start_tour = on_start_tour  # Grand Tour : on_start_tour(stages, teams, secret, animate, extensions,
+        #                                     ai_teams, team_types, breakaway, rest_after)
+        self.tour_stages = None  # étapes choisies pour le Tour (liste de Choice), None hors Grand Tour
+        self.tour_rest = set()
+        self.tour_frame = None
         self.extra_files: list[str] = []
         self.choices: list[Choice] = []
         self.rows: dict[str, ChoiceRow] = {}
@@ -251,6 +256,37 @@ class MenuScreen:
         if int(self.teams_var.get()) > 4 and PELOTON not in self.extensions():
             messagebox.showinfo("5 ou 6 équipes", "On joue à 5 ou 6 équipes avec l'extension Peloton : coche-la dans « Extensions ».")
             return
+        if GRAND_TOUR in self.extensions() and self.on_start_tour is not None:
+            self.show_tour_setup()
+            return
+        self.tour_stages = None
+        self.show_players()
+
+    # ------------------------------------------------------------ Grand Tour : choix des étapes
+
+    def show_tour_setup(self) -> None:
+        from tour_screens import TourSetupScreen  # importé ici : utile seulement pour le Grand Tour
+
+        self.frame.pack_forget()
+        playable = [c for c in self.choices if c.playable]
+        self.tour_frame = TourSetupScreen(self.parent, playable, self.hide_tour_setup, self._tour_chosen,
+                                          preselected=[c.key for c in (self.tour_stages or [self.current()])])
+        self.tour_frame.pack(fill="both", expand=True)
+
+    def hide_tour_setup(self) -> None:
+        if self.tour_frame is not None:
+            self.tour_frame.destroy()
+            self.tour_frame = None
+        self.frame.pack(fill="both", expand=True)
+
+    def _tour_chosen(self, stages, rest_after) -> None:
+        if any(c.group == GROUP_PELOTON for c in stages) and PELOTON not in self.extensions():
+            messagebox.showinfo("Extension Peloton", "Ton Tour contient des étapes Peloton : coche l'extension Peloton.")
+            return
+        self.tour_stages, self.tour_rest = stages, rest_after
+        if self.tour_frame is not None:
+            self.tour_frame.destroy()
+            self.tour_frame = None
         self.show_players()
 
     # ------------------------------------------------------------ écran « Qui joue ? »
@@ -339,10 +375,17 @@ class MenuScreen:
         if self.players_frame is not None:
             self.players_frame.destroy()
             self.players_frame = None
+        if self.tour_stages is not None:  # Grand Tour : on revient au choix des étapes
+            self.show_tour_setup()
+            return
         self.frame.pack(fill="both", expand=True)
 
     def breakaway_available(self) -> bool:
-        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours."""
+        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours (ou, pour un
+        Tour, sur une de ses étapes)."""
+        if self.tour_stages is not None:
+            return PELOTON in self.extensions() and any(
+                c.track.surface(s) == BREAKAWAY for c in self.tour_stages for s in range(len(c.track)))
         track = self.current().track
         return PELOTON in self.extensions() and track is not None and any(
             track.surface(s) == BREAKAWAY for s in range(len(track)))
@@ -353,6 +396,11 @@ class MenuScreen:
             return
         choice = self.current()
         breakaway = self.breakaway_available() and self.breakaway_var.get() is True
+        if self.tour_stages is not None:
+            self.on_start_tour(self.tour_stages, int(self.teams_var.get()), self.secret_var.get() is True,
+                               self.animate_var.get() is True, self.extensions(), self.ai_teams(), self.team_types(),
+                               PELOTON in self.extensions() and self.breakaway_var.get() is True, self.tour_rest)
+            return
         self.on_start(choice.track, int(self.teams_var.get()), self.secret_var.get() is True, self.animate_var.get() is True,
                       self.extensions(), self.ai_teams(), self.team_types(), breakaway)
 
@@ -367,8 +415,10 @@ class MenuScreen:
             text = "aucune : jeu de base"
         elif waiting:
             text = f"{', '.join(waiting)} : règles à venir"
-        else:
-            text = " · ".join(EXTENSIONS[name][1] for name in EXTENSIONS if name in chosen)
+        elif len(chosen) == 1:
+            text = EXTENSIONS[next(iter(chosen))][1]
+        else:  # plusieurs : leurs noms seulement, pour que la ligne tienne
+            text = " + ".join(EXTENSIONS[name][0] for name in EXTENSIONS if name in chosen)
         self.extensions_hint.config(text=text)
 
     def on_open_file(self) -> None:

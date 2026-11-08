@@ -1,11 +1,11 @@
 import pytest
 
-from flamme_rouge.extensions import EXTENSIONS, METEO, PELOTON, check_extensions, describe
+from flamme_rouge.extensions import EXTENSIONS, GRAND_TOUR, METEO, PELOTON, check_extensions, describe
 from flamme_rouge.game import Game
 
 
 def test_known_extensions():
-    assert set(EXTENSIONS) == {PELOTON, METEO}
+    assert set(EXTENSIONS) == {PELOTON, METEO, GRAND_TOUR}
     assert check_extensions([METEO]) == frozenset({METEO})
     with pytest.raises(ValueError):
         check_extensions(["bidon"])

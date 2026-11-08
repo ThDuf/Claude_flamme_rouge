@@ -21,6 +21,7 @@ from .extensions import METEO, PELOTON, check_extensions
 from .rider import Rider
 from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, SUPPLY, Track
 from .weather import Weather, WeatherZone, draw_weather
+from .stage import MOUNTAIN, SPRINT, TokenStack, finish_seconds
 
 HAND_SIZE = 4
 MOUNTAIN_SPEED = 5  # plafond en montée ET minimum en descente
@@ -64,9 +65,18 @@ class Game:
         extensions: Iterable[str] = (),
         weather: Optional[Sequence[WeatherZone]] = None,
         team_types: Optional[Sequence[str]] = None,
+        tour: bool = False,
+        decks: Optional[dict[tuple[int, int], list[Card]]] = None,
+        team_order: Optional[Sequence[int]] = None,
+        tokens: Optional[Sequence[TokenStack]] = None,
     ):
         """`weather` impose la météo (sinon, avec l'extension Météo, elle est tirée au hasard).
-        `team_types` : pour chaque équipe, TEAM_PLAYER (défaut), TEAM_PELOTON ou TEAM_MUSCLE (extension Peloton)."""
+        `team_types` : pour chaque équipe, TEAM_PLAYER (défaut), TEAM_PELOTON ou TEAM_MUSCLE (extension Peloton).
+
+        Grand Tour : `tour` = étape d'un Tour (l'étape continue jusqu'à ce que tout le monde ait passé la ligne,
+        avec temps, jetons Sprint/Montagne et podium) ; `decks` = paquet de chaque coureur (clé : équipe,
+        numéro du coureur dans l'équipe) hérité des étapes précédentes ; `team_order` = ordre dans lequel les
+        équipes se placent au départ ; `tokens` = piles de jetons Majeur/Mineur."""
         self.extensions = check_extensions(extensions)
         max_teams = PELOTON_MAX_TEAMS if PELOTON in self.extensions else BASE_MAX_TEAMS
         if not 2 <= num_teams <= max_teams:
@@ -103,7 +113,24 @@ class Game:
             if kind_of_team == TEAM_PELOTON:
                 self.peloton_pile = starting_deck(ROULEUR) + [attack_card(), attack_card()]
                 self.rng.shuffle(self.peloton_pile)
+        if decks:  # Grand Tour : chaque coureur garde son paquet d'une étape à l'autre (fatigue comprise)
+            for rider in self.riders:
+                if self.rider_key(rider) in decks and not self.is_ghost(rider):
+                    rider.draw_pile = list(decks[self.rider_key(rider)])
+                    self.rng.shuffle(rider.draw_pile)
+        self.team_order = list(team_order) if team_order is not None else list(range(num_teams))
         self._place_riders()
+        # Grand Tour
+        self.tour = tour
+        self.all_riders: list[Rider] = list(self.riders)  # tous les coureurs, même ceux déjà arrivés
+        self.arrived: list[Rider] = []  # ordre d'arrivée de l'étape
+        self.minutes: dict[Rider, int] = {r: 0 for r in self.riders}  # jetons Temps d'une minute
+        self.stage_time: dict[Rider, int] = {}  # temps d'étape en secondes, à l'arrivée
+        self.tokens = [TokenStack(t.square, t.kind, list(t.values), t.major) for t in (tokens or [])]
+        self.points: dict[str, dict[Rider, int]] = {SPRINT: {}, MOUNTAIN: {}}
+        self.last_tokens: list[tuple[Rider, TokenStack, int]] = []  # jetons pris au dernier tour
+        self.last_arrivals: list[Rider] = []  # coureurs arrivés au dernier tour
+        self.turn_start: dict[Rider, int] = {r: r.position for r in self.riders}
         if weather is None:
             weather = draw_weather(self.track, self.rng) if METEO in self.extensions else ()
         self.weather = Weather(weather)
@@ -152,11 +179,17 @@ class Game:
                 pair = sorted((r for r in self.riders if r.team == team), key=lambda r: r.kind != SPRINTEUR)
                 for rider in pair:
                     put(rider, free()[0])
-        for rider in self.riders:
-            if self.team_types[rider.team] == TEAM_PLAYER:
-                put(rider, free()[0])
+        for team in self.team_order:  # Grand Tour : l'équipe qui a le moins de Points de Tour se place d'abord
+            for rider in self.riders:
+                if rider.team == team and self.team_types[team] == TEAM_PLAYER:
+                    put(rider, free()[0])
 
     # ------------------------------------------------------------------ outils
+
+    def rider_key(self, rider: Rider) -> tuple[int, int]:
+        """Identité d'un coureur d'une étape à l'autre : (équipe, 0 pour le premier coureur, 1 pour le second)."""
+        team = [r for r in getattr(self, "all_riders", self.riders) if r.team == rider.team]
+        return rider.team, team.index(rider)
 
     def riders_at(self, square: int, exclude: Optional[Rider] = None) -> list[Rider]:
         return [r for r in self.riders if r.position == square and r is not exclude]
@@ -363,6 +396,7 @@ class Game:
     def movement_phase(self, played: dict[Rider, Card]) -> None:
         """Les coureurs avancent un par un, du premier au dernier."""
         order = sorted(self.riders, key=lambda r: (-r.position, r.lane))
+        self.turn_start = {r: r.position for r in self.riders}
         self.crashed_this_turn, self.stood_up_this_turn = [], []
         self.last_values = self.card_values(played)
         for rider in order:
@@ -435,18 +469,60 @@ class Game:
     def apply_exhaustion(self) -> list[Rider]:
         """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2).
         Les équipes fantômes (Peloton, Muscle) n'en prennent jamais."""
-        exhausted = [r for r in self.riders if not self.riders_at(r.position + 1) and not self.is_ghost(r)]
+        exhausted = [r for r in self.riders if not self.riders_at(r.position + 1) and not self.is_ghost(r)
+                     and not (self.tour and r.position >= len(self.track))]  # Grand Tour : pas pour les arrivés
         for rider in exhausted:
             rider.recycle.append(exhaustion_card())
         return exhausted
 
     def check_finish(self) -> None:
+        if self.tour:
+            self._tour_end_of_turn()
+            return
         crossed = [r for r in self.riders if r.position >= len(self.track)]
         if crossed:
             self.finished = True
             # Le plus loin gagne ; à égalité de case, le couloir de droite est devant
             # (hypothèse à vérifier dans le livret).
             self.winner = max(crossed, key=lambda r: (r.position, -r.lane))
+
+    # ------------------------------------------------------------ Grand Tour
+
+    def _take_tokens(self) -> None:
+        """Jetons Majeur/Mineur : chaque coureur qui est entré sur la case d'une pile ou l'a dépassée ce tour-ci
+        en prend un ; le plus avancé en fin de tour prend le plus haut."""
+        self.last_tokens = []
+        for stack in self.tokens:
+            takers = [r for r in self.riders if self.turn_start.get(r, r.position) < stack.square <= r.position]
+            for rider in sorted(takers, key=lambda r: (-r.position, r.lane)):
+                if not stack.values:
+                    break
+                value = stack.values.pop(0)
+                self.points[stack.kind][rider] = self.points[stack.kind].get(rider, 0) + value
+                self.last_tokens.append((rider, stack, value))
+
+    def _tour_end_of_turn(self) -> None:
+        """Fin de tour d'une étape de Tour (après l'aspiration et la fatigue) : jetons, puis les coureurs qui ont
+        passé la ligne prennent leur temps (secondes de la tuile Chronométrage selon le coureur de tête de leur
+        groupe) et quittent la piste ; les autres prennent un jeton d'une minute si quelqu'un est déjà arrivé."""
+        self._take_tokens()
+        finish = len(self.track)
+        crossed = sorted((r for r in self.riders if r.position >= finish), key=lambda r: (-r.position, r.lane))
+        self.last_arrivals = crossed
+        if crossed:
+            packs = self._packs()
+            for rider in crossed:
+                pack = next(p for p in packs if rider.position in p)
+                front = max(pack)
+                self.stage_time[rider] = self.minutes[rider] * 60 + finish_seconds(self.track, front - finish)
+            self.arrived.extend(crossed)
+            self.riders = [r for r in self.riders if r not in crossed]
+        if self.arrived:
+            for rider in self.riders:
+                self.minutes[rider] += 1
+        if not self.riders:
+            self.finished = True
+            self.winner = self.arrived[0]
 
     def end_phase(self) -> tuple[list[Rider], list[Rider]]:
         """Les cartes jouées sont déjà retirées du jeu ; puis aspiration, fatigue, vérification de l'arrivée."""

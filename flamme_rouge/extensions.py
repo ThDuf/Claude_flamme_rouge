@@ -9,14 +9,16 @@ from typing import Iterable
 
 PELOTON = "peloton"
 METEO = "meteo"
+GRAND_TOUR = "grandtour"
 
 # nom interne -> (nom affiché, description courte)
 EXTENSIONS = {
     PELOTON: ("Peloton", "5–6 équipes, pavés, ravitaillement, équipes fantômes"),
     METEO: ("Meteo", "vent et pluie sur les lignes droites"),
+    GRAND_TOUR: ("Grand Tour", "plusieurs étapes : temps, maillots, Points de Tour"),
 }
 
-READY: frozenset[str] = frozenset({METEO, PELOTON})  # extensions dont les règles sont programmées
+READY: frozenset[str] = frozenset({METEO, PELOTON, GRAND_TOUR})  # extensions dont les règles sont programmées
 
 
 def check_extensions(names: Iterable[str]) -> frozenset[str]:

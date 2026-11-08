@@ -108,7 +108,7 @@ def map_window(game: Game, extra_positions: Iterable[int] = ()) -> tuple[int, in
 
     `extra_positions` ajoute des cases à garder visibles (les départs, pendant une animation)."""
     total = len(game.track) + EXTRA_SQUARES
-    positions = [r.position for r in game.riders] + list(extra_positions)
+    positions = [r.position for r in game.riders] + list(extra_positions) or [len(game.track)]
     last = min(max(max(positions) + 5, min(positions) + 12), total - 1)
     first = max(0, min(positions) - 2)
     if last - first + 1 > MAP_MAX_SQUARES:
@@ -122,7 +122,7 @@ def full_window(game: Game, extra_positions: Iterable[int] = ()) -> tuple[int, i
     La vue ne s'agrandit que si un coureur dépasse la ligne de plus que ces cases : le zoom reste donc
     identique pendant presque toute la partie."""
     finish = len(game.track)
-    furthest = max([r.position for r in game.riders] + list(extra_positions))
+    furthest = max([r.position for r in game.riders] + list(extra_positions) or [finish])  # Tour : tous arrivés
     last = max(finish + FULL_VIEW_AFTER_FINISH - 1, furthest)
     return 0, min(last, finish + EXTRA_SQUARES - 1)
 
@@ -305,7 +305,7 @@ def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
         scale, mx, my = map_transform(game, zoom, window, width, height)
     else:
         scale, mx, my = view
-        first, last = 0, min(len(squares) - 1, max(full_window(game)[1], max(r.position for r in game.riders)))
+        first, last = 0, min(len(squares) - 1, max([full_window(game)[1]] + [r.position for r in game.riders]))
 
     def tr(p) -> tuple[float, float]:
         return (width / 2 + (p[0] - mx) * scale, height / 2 - (p[1] - my) * scale)
@@ -645,7 +645,7 @@ def track_preview_primitives(track: Track, width: int, height: int) -> list[tupl
 def minimap_primitives(game: Game) -> list[tuple]:
     """Toute la course en petit, avec un cadre autour de la partie affichée en grand."""
     finish = len(game.track)
-    end = max(finish + 3, max(r.position for r in game.riders) + 1)
+    end = max([finish + 3] + [r.position + 1 for r in game.riders])
     x0 = 10
     w = min(18, (BOARD_W - 20) // end)
     prims: list[tuple] = []
@@ -1015,8 +1015,10 @@ def _ease(f: float) -> float:
 
 
 def race_ranking(game: Game) -> list[Rider]:
-    """Classement de la course : le plus loin d'abord ; à égalité de case, la file de droite devant."""
-    return sorted(game.riders, key=lambda r: (-r.position, r.lane))
+    """Classement de la course : le plus loin d'abord ; à égalité de case, la file de droite devant.
+    Étape de Grand Tour : les coureurs arrivés (dans l'ordre d'arrivée), puis ceux encore en course."""
+    still = sorted(game.riders, key=lambda r: (-r.position, r.lane))
+    return list(getattr(game, "arrived", [])) + still if getattr(game, "tour", False) else still
 
 
 def podium_primitives(game: Game, width: int, height: int, t: float, team_names: Optional[Sequence[str]] = None) -> list[tuple]:
@@ -1025,13 +1027,14 @@ def podium_primitives(game: Game, width: int, height: int, t: float, team_names:
 
     `team_names` : comment nommer chaque équipe (par défaut « Équipe n »)."""
     ranking = race_ranking(game)
-    names = list(team_names or [f"Équipe {i + 1}" for i in range(max(r.team for r in game.riders) + 1)])
+    everyone = getattr(game, "all_riders", game.riders)
+    names = list(team_names or [f"Équipe {i + 1}" for i in range(max(r.team for r in everyone) + 1)])
     prims: list[tuple] = [("rect", 0, 0, width, height, "#0f1a33", "", 0)]
     for x in range(0, width, 90):  # rayons de lumière derrière le podium
         prims.append(("poly", [width / 2, height * 0.15, x, height, x + 45, height], "#14213f", "", 0))
 
     # confettis (derrière le podium et les coureurs)
-    teams = sorted({r.team for r in game.riders})
+    teams = sorted({r.team for r in everyone})
     for i in range(CONFETTI):
         phase = _frac(i * 0.6180339)
         speed = 0.18 + 0.22 * _frac(i * 0.4142)

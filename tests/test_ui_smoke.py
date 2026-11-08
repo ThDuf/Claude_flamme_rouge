@@ -95,3 +95,51 @@ def test_editor_tile_cards(root):
     app.listbox.selection_set(0)
     app.on_select()
     assert app.palette.selected == "a"  # la palette suit la tuile choisie dans la liste
+
+
+def test_a_whole_grand_tour_through_the_screens(root):
+    from flamme_rouge.catalog import build_choices
+    from flamme_rouge.controller import FINISHED
+    from main import Launcher
+
+    launcher = Launcher(root)
+    launcher.show_menu()
+    stages = [c for c in build_choices() if c.key.startswith("officiel:")][:3]
+    launcher.start_tour(stages, 2, False, False, ["grandtour"], {0, 1}, None, False, {1})
+    for number in range(1, 4):
+        app = launcher.app
+        assert app.game.tour and launcher.tour.stage_index == number - 1
+        turns = 0
+        while app.ctl.phase != FINISHED and turns < 200:
+            app.on_action()
+            turns += 1
+        assert app._podium_visible()
+        app.on_action()  # « Résultats de l'étape » : écran entre deux étapes
+        root.update()
+        assert launcher.app is None and len(launcher.tour.results) == number
+        if launcher.tour.finished:
+            launcher.show_final()
+        else:
+            launcher.play_stage()
+    root.update()
+    assert launcher.tour.finished and len(launcher.tour.final_ranking()) == 2
+
+
+def test_tour_stages_can_be_reordered(root):
+    from flamme_rouge.catalog import build_choices
+    from tour_screens import TourSetupScreen
+
+    chosen = []
+    screen = TourSetupScreen(root, build_choices(), lambda: None, lambda stages, rest: chosen.append((stages, rest)))
+    screen.pack()
+    screen.preset_official()
+    names = [c.label for c in screen.order]
+    screen.move(0, 1)  # la 1re étape passe en 2e
+    assert [c.label for c in screen.order][:2] == [names[1], names[0]]
+    screen.move(len(names) - 1, -1)  # la dernière remonte d'un cran
+    assert screen.order[-2].label == names[-1]
+    screen.move(0, -1)  # déjà en tête : rien ne bouge
+    assert screen.order[0].label == names[1]
+    root.update()
+    screen.go()
+    assert [c.label for c in chosen[0][0]] == [c.label for c in screen.order]

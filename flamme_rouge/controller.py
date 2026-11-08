@@ -14,6 +14,7 @@ from typing import Iterable, Optional
 from .ai import bid_card, breakaway_rider, choose_card
 from .cards import ATTACK, Card
 from .game import BID_ROUNDS, Game
+from .stage import format_time
 from .track import DESCENT
 from .rider import Rider
 
@@ -289,7 +290,20 @@ class TurnController:
             self.log.append(LogLine("Personne n'est fatigué."))
         g.check_finish()
         g.turn += 1
-        if g.finished:
+        if g.tour:  # Grand Tour : jetons pris, arrivées avec leur temps
+            for rider, stack, value in g.last_tokens:
+                self.log.append(LogLine(f"{rider.name} prend le jeton {stack.label} : {value} point(s)", rider.team))
+            if g.last_arrivals:
+                self.log.append(LogLine("Arrivées", heading=True))
+                for rider in g.last_arrivals:
+                    place = g.arrived.index(rider) + 1
+                    self.log.append(LogLine(f"{place}. {rider.name} : {format_time(g.stage_time[rider])}", rider.team))
+        if g.finished and g.tour:
+            self.phase = FINISHED
+            self.log.append(LogLine("ÉTAPE TERMINÉE", heading=True))
+            w = g.winner
+            self.log.append(LogLine(f"Victoire d'étape : {w.name} (équipe {w.team + 1}) en {format_time(g.stage_time[w])}", w.team))
+        elif g.finished:
             self.phase = FINISHED
             w = g.winner
             self.log.append(LogLine("ARRIVÉE", heading=True))

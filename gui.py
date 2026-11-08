@@ -67,11 +67,17 @@ WINDOW_W, WINDOW_H = 1040, 985
 
 class App:
     def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True,
-                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False):
+                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False, game=None, on_stage_end=None,
+                 stage_title: str = ""):
+        """`game` : une partie déjà préparée (étape d'un Grand Tour) ; `on_stage_end()` est appelé quand on clique
+        sur « Résultats de l'étape » à la fin d'une étape de Tour ; `stage_title` s'affiche dans la fenêtre."""
         self.parent = root  # conteneur où l'on dessine (la fenêtre, ou un cadre quand on vient du menu)
         self.root = root.winfo_toplevel()  # la fenêtre elle-même : titre, minuteur, fenêtres annexes
         self.root.title("Flamme Rouge")
-        self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
+        self.game = game or Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
+        self.on_stage_end = on_stage_end
+        if stage_title:
+            self.root.title(f"Flamme Rouge — {stage_title}")
         self.ctl = TurnController(self.game, ai_teams, breakaway)  # `ai_teams` : jouées par l'IA
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
@@ -194,6 +200,10 @@ class App:
         if self.anim is not None:
             return
         phase = self.ctl.phase
+        if phase == FINISHED and self.on_stage_end is not None:  # Grand Tour : écran des résultats de l'étape
+            self.close()
+            self.on_stage_end()
+            return
         before = snapshot(self.game.riders)
         self.ctl.advance()
         self.revealed = False
@@ -215,7 +225,7 @@ class App:
         """Cadrage automatique, recentré sur le milieu des coureurs : point de départ des boutons ＋ et －."""
         scale, _cx, _cy = self._auto_view()
         squares = layout_squares(self.game.track)
-        points = [point_on_road(squares, r.position, r.lane) for r in self.game.riders]
+        points = [point_on_road(squares, r.position, r.lane) for r in self.game.riders] or [point_on_road(squares, 0, 0)]
         return scale, sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
 
     def zoom_at(self, factor: float, x=None, y=None) -> None:
@@ -272,8 +282,8 @@ class App:
     def _team_names(self) -> list[str]:
         """« Équipe 2 · IA », « Équipe 3 · Peloton »… pour l'écran de victoire."""
         names = []
-        for team in range(max(r.team for r in self.game.riders) + 1):
-            rider = next(r for r in self.game.riders if r.team == team)
+        for team in range(max(r.team for r in self.game.all_riders) + 1):
+            rider = next(r for r in self.game.all_riders if r.team == team)
             who = self.ctl.controller_of(rider)
             names.append(f"Équipe {team + 1}" + ("" if who == "Joueur" else f" · {who}"))
         return names
@@ -412,9 +422,10 @@ class App:
 
         self._show_hand()
         self._refresh_decks()
+        tour_end = phase == FINISHED and self.on_stage_end is not None
         self.action_btn.config(
-            text=ACTION_TEXT[phase],
-            state="normal" if phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION) and self.anim is None else "disabled",
+            text="▶ Résultats de l'étape et classements" if tour_end else ACTION_TEXT[phase],
+            state="normal" if (phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION) or tour_end) and self.anim is None else "disabled",
         )
         self._flush_log()
 
