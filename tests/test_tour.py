@@ -177,3 +177,42 @@ def test_team_order_after_the_first_stage():
     order = tour.team_order()
     points = [tour.tour_points(t, with_bonus=False) for t in order]
     assert points == sorted(points)  # le moins de Points de Tour se place d'abord
+
+
+def test_jersey_markers_show_the_next_token_on_the_map_and_profile():
+    from flamme_rouge.boardview import (
+        JERSEY_GREEN, JERSEY_POLKA, jersey_primitives, map_primitives, profile_primitives)
+
+    track = official(3)  # La Classicissima : un col (Montagne) et l'arrivée (Sprint)
+    g = Game(track, num_teams=2, seed=0, tour=True, tokens=place_tokens(track))
+    kinds = {s.kind for s in g.tokens}
+    assert kinds == {SPRINT, MOUNTAIN}
+    fills = lambda prims: [p[2] for p in prims if p[0] == "poly"]
+    texts = lambda prims: [p[3] for p in prims if p[0] == "text"]
+    prims = map_primitives(g)
+    assert JERSEY_GREEN in fills(prims) and JERSEY_POLKA in fills(prims)
+    first = g.tokens[0]
+    assert str(first.values[0]) in texts(prims) and "puis " + " · ".join(map(str, first.values[1:])) in texts(prims)
+    first.values.clear()  # pile vide : maillot grisé
+    assert "plus de jeton" in texts(map_primitives(g))
+    profile = profile_primitives(track, 1000, 100, riders=g.riders, tokens=g.tokens)
+    assert JERSEY_GREEN in fills(profile)
+    assert fills(jersey_primitives(50, 50, 20, SPRINT, 5))[0] == JERSEY_GREEN
+    assert "5" in texts(jersey_primitives(50, 50, 20, MOUNTAIN, 5))
+    assert Game(track, num_teams=2, seed=0).tokens == []  # pas de jetons hors Grand Tour
+
+
+def test_jersey_holders_wear_them_on_the_next_stage():
+    from flamme_rouge.boardview import JERSEY_RING, JERSEY_YELLOW, map_primitives, profile_primitives
+
+    tour = make_tour()
+    assert tour.start_stage().jerseys == {}  # 1re étape : personne n'a encore de maillot
+    tour = make_tour()
+    run_stage(tour)
+    g = tour.start_stage()
+    worn = {g.rider_key(r): j for r, j in g.jerseys.items()}
+    assert worn == {k: j for j, k in tour.jerseys.items()} and YELLOW in worn.values()
+    fills = [p[2] for p in map_primitives(g) if p[0] == "poly"]
+    assert JERSEY_YELLOW in fills
+    profile = profile_primitives(g.track, 1000, 100, riders=g.riders, jerseys=g.jerseys)
+    assert any(p[0] == "oval" and p[6] == JERSEY_RING[YELLOW] for p in profile)

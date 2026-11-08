@@ -91,8 +91,11 @@ quelques cartes du paquet et certaines cartes ont un pouvoir :
 
 ## Ce qui est programmé (Tour de base)
 
-- Menu : interrupteur « Grand Tour » ; « Lancer la course » ouvre le choix des étapes (dans l'ordre où on les
-  ajoute, au moins 3, préréglage « les 6 étapes officielles ») et du jour de repos, puis « Qui joue ? ».
+- Menu : premier écran « Course unique » ou « Grand Tour ». Le Grand Tour ouvre le choix des étapes (aperçu et
+  profil du parcours, création de parcours, liste ordonnée ▲▼✕, au moins 3, préréglage « 6 officielles », jour de
+  repos), puis « Qui joue ? » (nombre d'équipes, joueurs/IA, extensions et options).
+- Pendant une étape : petits maillots près des piles de jetons (valeur du prochain jeton) et maillot porté par
+  le leader de chaque classement (sur la carte et en anneau sur le profil).
 - Étape de Tour (`Game(tour=True)`, `flamme_rouge/stage.py`) : l'étape continue jusqu'à ce que tout le monde
   ait passé la ligne ; temps (minutes + secondes de la tuile Chronométrage, temps du coureur de tête du groupe) ;
   pas de fatigue pour les arrivés ; jetons Majeur/Mineur Sprint et Montagne.

@@ -32,17 +32,20 @@ def test_menu_then_a_whole_game_then_back(root):
     launcher.container = tk.Frame(root)
     launcher.container.pack(fill="both", expand=True)
     menu = MenuScreen(launcher.container, launcher.start_game)
+    assert menu.type_frame is not None and menu.frame is None  # 1er écran : le type de course
+    menu.choose_mode("course")
     assert menu.start_btn.cget("state") == "normal"
     menu.on_pick(menu.rows["officiel:Ronde van Wevelgem"].choice)
     assert menu.start_btn.cget("state") == "normal"  # les étapes officielles sont jouables
     menu.on_pick(menu.rows["base:Classique"].choice)
-    menu.teams_var.set(3)
+    menu.on_launch()  # ouvre l'écran « Qui joue ? » : nombre d'équipes, extensions et options
+    assert launcher.app is None and menu.players_frame is not None
     assert "jeu de base" in menu.extensions_hint.cget("text")
     menu.extension_vars["meteo"].set(True)
-    menu._refresh_extensions()
+    menu._extensions_changed_on_players()
     assert "pluie" in menu.extensions_hint.cget("text")  # règles Météo programmées
-    menu.on_launch()  # ouvre l'écran « Qui joue ? »
-    assert launcher.app is None and menu.players_frame is not None
+    menu.teams_var.set(3)
+    menu.show_players()
     assert menu.ai_teams() == frozenset({1, 2})  # par défaut : équipe 1 jouée par un joueur, les autres par l'IA
     menu.hide_players()  # retour au menu, puis on revient
     menu.on_launch()
@@ -105,7 +108,7 @@ def test_a_whole_grand_tour_through_the_screens(root):
     launcher = Launcher(root)
     launcher.show_menu()
     stages = [c for c in build_choices() if c.key.startswith("officiel:")][:3]
-    launcher.start_tour(stages, 2, False, False, ["grandtour"], {0, 1}, None, False, {1})
+    launcher.start_tour(stages, 2, False, False, [], {0, 1}, None, False, {1})
     for number in range(1, 4):
         app = launcher.app
         assert app.game.tour and launcher.tour.stage_index == number - 1
@@ -125,21 +128,61 @@ def test_a_whole_grand_tour_through_the_screens(root):
     assert launcher.tour.finished and len(launcher.tour.final_ranking()) == 2
 
 
-def test_tour_stages_can_be_reordered(root):
-    from flamme_rouge.catalog import build_choices
-    from tour_screens import TourSetupScreen
+def test_grand_tour_menu_stages_reordered_then_players(root):
+    from menu import MenuScreen
 
-    chosen = []
-    screen = TourSetupScreen(root, build_choices(), lambda: None, lambda stages, rest: chosen.append((stages, rest)))
-    screen.pack()
-    screen.preset_official()
-    names = [c.label for c in screen.order]
-    screen.move(0, 1)  # la 1re étape passe en 2e
-    assert [c.label for c in screen.order][:2] == [names[1], names[0]]
-    screen.move(len(names) - 1, -1)  # la dernière remonte d'un cran
-    assert screen.order[-2].label == names[-1]
-    screen.move(0, -1)  # déjà en tête : rien ne bouge
-    assert screen.order[0].label == names[1]
+    started = []
+    menu = MenuScreen(root, lambda *a: None, lambda *a: started.append(a))
+    menu.choose_mode("tour")
     root.update()
-    screen.go()
-    assert [c.label for c in chosen[0][0]] == [c.label for c in screen.order]
+    assert menu.add_btn is not None and menu.start_btn.cget("state") == "disabled"  # moins de 3 étapes
+    menu.on_pick(menu.rows["officiel:La Haut Montagne"].choice)
+    menu.tour_add_current()  # le parcours affiché dans l'aperçu
+    menu.tour_preset_official()
+    names = [c.label for c in menu.tour_order]
+    assert len(names) == 6 and menu.start_btn.cget("state") == "normal"
+    menu.tour_move(0, 1)  # la 1re étape passe en 2e
+    assert [c.label for c in menu.tour_order][:2] == [names[1], names[0]]
+    menu.tour_move(len(names) - 1, -1)  # la dernière remonte d'un cran
+    assert menu.tour_order[-2].label == names[-1]
+    menu.tour_move(0, -1)  # déjà en tête : rien ne bouge
+    assert menu.tour_order[0].label == names[1]
+    menu.tour_remove(0)
+    assert len(menu.tour_order) == 5
+    menu.tour_rest_var.set("2")
+    menu.refresh_tour()
+    menu.on_launch()  # « Qui joue ? » avec le nombre d'équipes
+    root.update()
+    assert menu.players_frame is not None
+    menu.teams_var.set(4)
+    menu.show_players()
+    menu.on_players_start()
+    stages, teams = started[0][0], started[0][1]
+    assert [c.label for c in stages] == [c.label for c in menu.tour_order] and teams == 4
+    assert started[0][-1] == {2}  # jour de repos après l'étape 2
+    menu.show_type_screen()  # retour au premier écran
+    assert menu.frame is None and menu.type_frame is not None
+
+
+def test_extensions_can_be_chosen_on_the_players_screen(root):
+    from flamme_rouge.extensions import PELOTON
+    from menu import MenuScreen
+
+    started = []
+    menu = MenuScreen(root, lambda *a: started.append(a), lambda *a: None)
+    menu.choose_mode("course")
+    menu.on_launch()
+    root.update()
+    assert menu.player_options() == ["joueur", "ia"]
+    menu.extension_vars[PELOTON].set(True)
+    menu._extensions_changed_on_players()  # l'écran se reconstruit avec les équipes fantômes
+    assert "peloton" in menu.player_options() and "équipes fantômes" in menu.extensions_hint.cget("text")
+    menu.teams_var.set(6)
+    menu.show_players()
+    menu.extension_vars[PELOTON].set(False)
+    menu._extensions_changed_on_players()  # sans Peloton : 6 équipes refusées
+    assert "Peloton" in menu.players_hint.cget("text")
+    menu.extension_vars[PELOTON].set(True)
+    menu._extensions_changed_on_players()
+    menu.on_players_start()
+    assert started and started[0][1] == 6 and PELOTON in started[0][4]

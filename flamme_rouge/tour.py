@@ -111,6 +111,8 @@ class Tour:
                     team_order=self.team_order(), tokens=place_tokens(stage.track), **game_options)
         if not self.names:
             self.names = {game.rider_key(r): r.name for r in game.riders}
+        holders = {k: jersey for jersey, k in self.jerseys.items()}
+        game.jerseys = {r: holders[game.rider_key(r)] for r in game.riders if game.rider_key(r) in holders}
         return game
 
     def finish_stage(self, game: Game) -> StageResult:

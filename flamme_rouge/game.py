@@ -128,6 +128,7 @@ class Game:
         self.stage_time: dict[Rider, int] = {}  # temps d'étape en secondes, à l'arrivée
         self.tokens = [TokenStack(t.square, t.kind, list(t.values), t.major) for t in (tokens or [])]
         self.points: dict[str, dict[Rider, int]] = {SPRINT: {}, MOUNTAIN: {}}
+        self.jerseys: dict[Rider, str] = {}  # Grand Tour : maillot porté (jaune, vert, pois), posé par le Tour
         self.last_tokens: list[tuple[Rider, TokenStack, int]] = []  # jetons pris au dernier tour
         self.last_arrivals: list[Rider] = []  # coureurs arrivés au dernier tour
         self.turn_start: dict[Rider, int] = {r: r.position for r in self.riders}

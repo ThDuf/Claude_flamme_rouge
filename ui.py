@@ -117,6 +117,21 @@ class FlatButton(tk.Label):
             self._command()
 
 
+def _trace_while_alive(widget, variable, callback) -> None:
+    """Suit `variable` tant que `widget` existe : la trace est retirée quand il est détruit (une même variable
+    sert à plusieurs écrans qui se reconstruisent)."""
+    name = variable.trace_add("write", lambda *_: callback())
+
+    def drop(event) -> None:
+        if event.widget is widget:
+            try:
+                variable.trace_remove("write", name)
+            except tk.TclError:
+                pass
+
+    widget.bind("<Destroy>", drop, add="+")
+
+
 class Toggle(tk.Label):
     """Interrupteur : une pastille qui s'allume (liée à une BooleanVar)."""
 
@@ -127,7 +142,7 @@ class Toggle(tk.Label):
         self.bind("<ButtonRelease-1>", self._toggle)
         self.bind("<Enter>", lambda _e: self._paint(True))
         self.bind("<Leave>", lambda _e: self._paint(False))
-        variable.trace_add("write", lambda *_: self._paint(False))
+        _trace_while_alive(self, variable, lambda: self._paint(False))
         self._paint(False)
 
     def _toggle(self, _event) -> None:
@@ -153,7 +168,7 @@ class Segmented(tk.Frame):
             label.pack(side="left", padx=(0, 4))
             label.bind("<ButtonRelease-1>", lambda _e, v=value: self._choose(v))
             self._labels[value] = label
-        variable.trace_add("write", lambda *_: self._paint())
+        _trace_while_alive(self, variable, self._paint)
         self._paint()
 
     def _choose(self, value) -> None:
@@ -185,7 +200,7 @@ class RadioList(tk.Frame):
             for widget in (row, strip, label):
                 widget.bind("<ButtonRelease-1>", lambda _e, v=value: self._choose(v))
             self._rows[value] = (row, strip, label)
-        variable.trace_add("write", lambda *_: self._paint())
+        _trace_while_alive(self, variable, self._paint)
         self._paint()
 
     def _choose(self, value) -> None:
@@ -244,7 +259,8 @@ class ScrollFrame(tk.Frame):
     def __init__(self, parent, bg=pal.CARD, width=330, height=400, **kw):
         super().__init__(parent, bg=bg, **kw)
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, width=width, height=height)
-        self.bar = tk.Canvas(self, bg=bg, highlightthickness=0, width=6)
+        # hauteur 1 : sinon le Canvas prend sa hauteur par défaut (~265 px) et agrandit les petites listes
+        self.bar = tk.Canvas(self, bg=bg, highlightthickness=0, width=6, height=1)
         self.bar.pack(side="right", fill="y", padx=(0, 3))
         self.canvas.pack(side="left", fill="both", expand=True)
         self.inner = tk.Frame(self.canvas, bg=bg)

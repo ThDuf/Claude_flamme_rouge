@@ -21,6 +21,7 @@ from .rider import Rider
 from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
 from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, NORMAL, SUPPLY, Track
 from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
+from .stage import MOUNTAIN as TOKEN_MOUNTAIN, TokenStack
 
 from . import palette as pal
 from .palette import BEYOND_FILL, LABEL_ON_FILL, TEAM_FILL, TEAM_TEXT, TERRAIN_FILL, TERRAIN_SYMBOL_COLOR
@@ -297,6 +298,65 @@ def _surface_labels(prims: list, squares, track: Track, indices, tr, scale: floa
         s = end
 
 
+JERSEY_GREEN, JERSEY_GREEN_EDGE = "#22c55e", "#14532d"
+JERSEY_POLKA, JERSEY_POLKA_DOT, JERSEY_POLKA_EDGE = "#ffffff", "#e11d2e", "#7f1d1d"
+JERSEY_YELLOW, JERSEY_YELLOW_EDGE = "#facc15", "#854d0e"
+JERSEY_KIND_YELLOW, JERSEY_KIND_GREEN, JERSEY_KIND_POLKA = "jaune", "vert", "pois"  # = tour.YELLOW, GREEN, POLKA
+JERSEY_RING = {JERSEY_KIND_YELLOW: JERSEY_YELLOW, JERSEY_KIND_GREEN: JERSEY_GREEN, JERSEY_KIND_POLKA: JERSEY_POLKA_DOT}
+
+
+def worn_jersey_primitives(cx: float, cy: float, radius: float, jersey: str) -> list[tuple]:
+    """Grand Tour : le maillot porté par un coureur, en petit, accroché en haut à droite de sa pastille."""
+    size = max(13.0, radius * 1.3)
+    return jersey_primitives(cx + radius * 0.85, cy - radius * 0.85, size, jersey, None)
+
+
+def jersey_primitives(cx: float, cy: float, size: float, kind: str, value: Optional[int], dim: bool = False) -> list[tuple]:
+    """Petit maillot centré en (cx, cy) : vert pour le Sprint, blanc à pois rouges pour la Montagne, avec au milieu
+    la valeur du prochain jeton à gagner. `dim` : pile vide (maillot grisé, sans valeur)."""
+    s = size / 2
+    # contour d'un maillot vu de face : épaules, manches courtes, col
+    shape = [(-0.35, -1.0), (-0.12, -0.82), (0.12, -0.82), (0.35, -1.0), (1.0, -0.62), (0.78, -0.18), (0.55, -0.32),
+             (0.55, 1.0), (-0.55, 1.0), (-0.55, -0.32), (-0.78, -0.18), (-1.0, -0.62)]
+    points = [c for x, y in shape for c in (cx + x * s, cy + y * s)]
+    mountain = kind in (TOKEN_MOUNTAIN, JERSEY_KIND_POLKA)
+    fill = JERSEY_POLKA if mountain else JERSEY_GREEN
+    edge = JERSEY_POLKA_EDGE if mountain else JERSEY_GREEN_EDGE
+    if kind == JERSEY_KIND_YELLOW:
+        fill, edge = JERSEY_YELLOW, JERSEY_YELLOW_EDGE
+    if dim:
+        fill, edge = "#64748b", "#334155"
+    prims: list[tuple] = [("poly", points, fill, edge, 2 if size >= 18 else 1)]
+    if mountain and not dim:
+        r = max(1.2, size * 0.07)
+        for dx, dy in ((-0.38, -0.45), (0.38, -0.45), (-0.3, 0.55), (0.3, 0.55), (0.0, 0.05), (-0.62, -0.62),
+                       (0.62, -0.62)):
+            prims.append(("oval", cx + dx * s - r, cy + dy * s - r, cx + dx * s + r, cy + dy * s + r,
+                          JERSEY_POLKA_DOT, "", 0))
+    if value is not None and not dim:
+        color = "#7f1d1d" if mountain else "#ffffff"
+        prims.append(("text", cx, cy + s * 0.12, str(value), color, max(7, int(size * 0.42)), True, "center"))
+    return prims
+
+
+def _token_jerseys(prims: list, squares, tokens, track: Track, shown, tr, scale: float) -> None:
+    """Grand Tour : à côté de chaque pile de jetons, un petit maillot avec la valeur du prochain jeton à gagner
+    (vert = Sprint, à pois = Montagne), et la suite de la pile en petit."""
+    shown = set(shown)
+    size = max(16.0, min(30.0, 0.75 * scale))
+    for stack in tokens:
+        square = min(stack.square, len(squares) - 1)
+        if square not in shown:
+            continue
+        lanes = squares[square].lanes
+        x, y = tr(point_on_road(squares, square, lanes + 1.6))
+        value = stack.values[0] if stack.values else None
+        prims.extend(jersey_primitives(x, y, size, stack.kind, value, dim=not stack.values))
+        rest = " · ".join(str(v) for v in stack.values[1:])
+        caption = ("puis " + rest) if rest else ("dernier jeton" if stack.values else "plus de jeton")
+        prims.append(("text", x, y + size * 0.5 + 8, caption, pal.MUTED, 7, False, "center"))
+
+
 def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
     """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels)."""
     squares = layout_squares(game.track)
@@ -472,6 +532,8 @@ def map_primitives(
             if s < finish and track.kind(s) != NORMAL:
                 _slope_chevrons(prims, squares, s, track.kind(s), tr, 3 if scale >= 25 else 2)
     _surface_labels(prims, squares, track, shown, tr, scale)
+    if getattr(game, "tokens", None):
+        _token_jerseys(prims, squares, game.tokens, track, shown, tr, scale)
     if track.start and first <= track.start <= last:
         _start_line(prims, squares, track.start, tr)
     if first <= finish <= last + 1:
@@ -506,6 +568,9 @@ def map_primitives(
             continue
         prims.append(("oval", cx - radius, cy - radius, cx + radius, cy + radius, TEAM_FILL[rider.team], pal.RIDER_OUTLINE, 2))
         prims.append(("text", cx, cy, rider.name, LABEL_ON_FILL[rider.team], font_size, True, "center"))
+        jersey = getattr(game, "jerseys", {}).get(rider)
+        if jersey:
+            prims.extend(worn_jersey_primitives(cx, cy, radius, jersey))
     return prims
 
 
@@ -866,6 +931,8 @@ def profile_primitives(
     marker: Optional[float] = None,
     riders: Optional[Sequence[Rider]] = None,
     weather: Optional[Weather] = None,
+    tokens: Optional[Sequence[TokenStack]] = None,
+    jerseys: Optional[dict] = None,
 ) -> list[tuple]:
     """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris, cols catégorisés.
 
@@ -930,6 +997,12 @@ def profile_primitives(
         prims.append(("line", x_of(m), PROFILE_PAD_TOP, x_of(m), base, pal.ACCENT, 2))
         prims.append(("oval", x_of(m) - 4, PROFILE_PAD_TOP - 4, x_of(m) + 4, PROFILE_PAD_TOP + 4, pal.ACCENT, "#ffffff", 1))
 
+    for stack in tokens or ():  # Grand Tour : petit maillot au-dessus de chaque pile de jetons
+        x = min(x_of(min(stack.square, n)) + 22, width - 10)  # à droite du badge de col éventuel
+        y = max(12.0, y_at(min(stack.square, n)) - 14)
+        prims.extend(jersey_primitives(x, y, 16, stack.kind, stack.values[0] if stack.values else None,
+                                       dim=not stack.values))
+
     if riders:
         # les groupes nommés, écrits au-dessus des coureurs ; une étiquette qui en chevaucherait une autre
         # (ou un badge de col) monte d'un cran
@@ -952,6 +1025,9 @@ def profile_primitives(
         for rider in riders:
             x = x_of(min(rider.position + 0.5, n))
             y = y_at(min(rider.position + 0.5, n)) - 5 - 7 * rider.lane
+            jersey = (jerseys or {}).get(rider)
+            if jersey:  # Grand Tour : un anneau à la couleur du maillot porté
+                prims.append(("oval", x - 6.5, y - 6.5, x + 6.5, y + 6.5, "", JERSEY_RING[jersey], 2.5))
             prims.append(("oval", x - 4, y - 4, x + 4, y + 4, TEAM_FILL[rider.team], "#ffffff", 1))
     return prims
 

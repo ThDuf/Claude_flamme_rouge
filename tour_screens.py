@@ -1,4 +1,4 @@
-"""Écrans du Grand Tour : choix des étapes, résultats entre deux étapes, classement final."""
+"""Écrans du Grand Tour : résultats entre deux étapes, classement final (le choix des étapes est dans menu.py)."""
 import tkinter as tk
 from tkinter import messagebox
 
@@ -9,7 +9,6 @@ from flamme_rouge.tour import GREEN, JERSEY_NAMES, POLKA, YELLOW, StageResult, T
 
 JERSEY_COLORS = {YELLOW: "#facc15", GREEN: "#22c55e", POLKA: "#f87171"}
 TEAM_COLOR_NAMES = ["rouge", "bleue", "verte", "jaune", "rose", "blanche"]
-MIN_STAGES = 3
 
 
 def _header(parent, title: str, subtitle: str = "") -> None:
@@ -33,135 +32,6 @@ def _bottom_bar(parent):
 def _rider_chip(parent, name: str, team: int, bg=pal.CARD) -> tk.Label:
     return tk.Label(parent, text=name, font=ui.font(10, True), bg=pal.TEAM_FILL[team], fg=pal.LABEL_ON_FILL[team],
                     padx=5, width=4)
-
-
-# ---------------------------------------------------------------------- choix des étapes
-
-
-class TourSetupScreen(tk.Frame):
-    """Choix des étapes du Tour (dans l'ordre où on les coche) et du jour de repos."""
-
-    def __init__(self, parent, choices, on_back, on_next, preselected=None):
-        """`choices` : parcours jouables du menu ; `on_next(stages, rest_after)` avec la liste des Choice choisis."""
-        super().__init__(parent, bg=pal.BG)
-        self.choices = [c for c in choices if c.playable]
-        self.on_back, self.on_next = on_back, on_next
-        self.order: list = [c for c in self.choices if c.key in (preselected or [])]
-        self.rest_var = tk.StringVar(value="aucun")
-        _header(self, "GRAND TOUR", "choisis les étapes, dans l'ordre où elles seront courues")
-        body = tk.Frame(self, bg=pal.BG)
-        body.pack(fill="both", expand=True, padx=40, pady=18)
-
-        left = tk.Frame(body, bg=pal.BG)
-        left.pack(side="left", fill="both", expand=True)
-        ui.title_label(left, "Parcours disponibles (clic : ajouter)").pack(anchor="w", pady=(0, 6))
-        listing = ui.card(left)
-        listing.pack(fill="both", expand=True)
-        self.scroll = ui.ScrollFrame(listing, width=420, height=470)
-        self.scroll.pack(fill="both", expand=True, padx=1, pady=1)
-        group = None
-        for choice in self.choices:
-            if choice.group != group:
-                group = choice.group
-                tk.Label(self.scroll.inner, text=group.upper(), font=ui.font(9, True), bg=pal.CARD, fg=pal.ACCENT,
-                         anchor="w").pack(fill="x", padx=12, pady=(10, 2))
-            ui.FlatButton(self.scroll.inner, f"＋  {choice.label}", lambda c=choice: self.add(c), size=10, style="ghost",
-                          pady=4).pack(fill="x", padx=8, pady=1)
-
-        right = tk.Frame(body, bg=pal.BG)
-        right.pack(side="left", fill="both", expand=True, padx=(30, 0))
-        ui.title_label(right, "Ton Tour (▲ ▼ pour changer l'ordre)").pack(anchor="w", pady=(0, 6))
-        self.list_frame = tk.Frame(right, bg=pal.BG)
-        self.list_frame.pack(fill="x")
-        presets = tk.Frame(right, bg=pal.BG)
-        presets.pack(fill="x", pady=(10, 0))
-        ui.FlatButton(presets, "Les 6 étapes officielles", self.preset_official, size=10).pack(side="left")
-        ui.FlatButton(presets, "Tout enlever", self.clear, size=10, style="ghost").pack(side="left", padx=8)
-        rest = tk.Frame(right, bg=pal.BG)
-        rest.pack(fill="x", pady=(16, 0))
-        tk.Label(rest, text="Jour de repos après l'étape", font=ui.font(11, True), bg=pal.BG, fg=pal.TEXT).pack(side="left")
-        self.rest_menu_frame = tk.Frame(rest, bg=pal.BG)
-        self.rest_menu_frame.pack(side="left", padx=10)
-        self.hint = tk.Label(right, text="", font=ui.font(10), bg=pal.BG, fg=pal.MUTED, anchor="w", justify="left",
-                             wraplength=480)
-        self.hint.pack(fill="x", pady=(14, 0))
-
-        bar = _bottom_bar(self)
-        ui.FlatButton(bar, "⟵  Retour au menu", self.on_back, size=11, style="ghost").pack(side="left")
-        self.next_btn = ui.FlatButton(bar, "Suivant : qui joue ?  ▶", self.go, style="primary", size=14, padx=28, pady=12)
-        self.next_btn.pack(side="right")
-        self.refresh()
-
-    def add(self, choice) -> None:
-        self.order.append(choice)
-        self.refresh()
-
-    def remove(self, index: int) -> None:
-        del self.order[index]
-        self.refresh()
-
-    def move(self, index: int, delta: int) -> None:
-        """Avance (delta = -1) ou recule (delta = +1) une étape dans l'ordre du Tour."""
-        target = index + delta
-        if 0 <= target < len(self.order):
-            self.order[index], self.order[target] = self.order[target], self.order[index]
-            self.refresh()
-
-    def preset_official(self) -> None:
-        self.order = [c for c in self.choices if c.key.startswith("officiel:")]
-        self.refresh()
-
-    def clear(self) -> None:
-        self.order = []
-        self.refresh()
-
-    def rest_after(self) -> set[int]:
-        value = self.rest_var.get()
-        return {int(value)} if value.isdigit() else set()
-
-    def refresh(self) -> None:
-        for widget in self.list_frame.winfo_children():
-            widget.destroy()
-        if not self.order:
-            tk.Label(self.list_frame, text="Aucune étape : ajoute-en au moins 3.", font=ui.font(11), bg=pal.BG,
-                     fg=pal.FAINT).pack(anchor="w")
-        for i, choice in enumerate(self.order):
-            row = tk.Frame(self.list_frame, bg=pal.CARD)
-            row.pack(fill="x", pady=1)
-            tk.Label(row, text=f"Étape {i + 1}", font=ui.font(10, True), bg=pal.CARD, fg=pal.ACCENT, width=8,
-                     anchor="w").pack(side="left", padx=(8, 0))
-            tk.Label(row, text=choice.label, font=ui.font(10), bg=pal.CARD, fg=pal.TEXT, anchor="w").pack(side="left")
-            ui.FlatButton(row, "✕", lambda i=i: self.remove(i), size=9, style="ghost", padx=6, pady=2).pack(side="right")
-            down = ui.FlatButton(row, "▼", lambda i=i: self.move(i, 1), size=9, style="ghost", padx=6, pady=2)
-            down.pack(side="right")
-            up = ui.FlatButton(row, "▲", lambda i=i: self.move(i, -1), size=9, style="ghost", padx=6, pady=2)
-            up.pack(side="right")
-            if i == 0:
-                up.config(state="disabled")
-            if i == len(self.order) - 1:
-                down.config(state="disabled")
-            if i + 1 in self.rest_after() and i + 1 < len(self.order):
-                tk.Label(self.list_frame, text="   — jour de repos —", font=ui.font(9, True), bg=pal.BG,
-                         fg=pal.GOOD).pack(anchor="w")
-        for widget in self.rest_menu_frame.winfo_children():
-            widget.destroy()
-        options = ["aucun"] + [str(n) for n in range(1, len(self.order))]
-        if self.rest_var.get() not in options:
-            self.rest_var.set("aucun")
-        menu = tk.OptionMenu(self.rest_menu_frame, self.rest_var, *options, command=lambda _v: self.refresh())
-        ui.style_option_menu(menu)
-        menu.pack()
-        n = len(self.order)
-        length = "court (3 à 7 étapes)" if n <= 7 else "moyen (8 à 14 étapes)" if n <= 14 else "long (15 à 21 étapes)"
-        self.hint.config(text=f"{n} étape(s) · Tour {length}. Les étapes de l'extension Peloton demandent de la cocher. "
-                              "Entre deux étapes, chaque coureur garde la moitié de sa fatigue.")
-        self.next_btn.config(state="normal" if n >= MIN_STAGES else "disabled")
-
-    def go(self) -> None:
-        if len(self.order) < MIN_STAGES:
-            messagebox.showinfo("Grand Tour", "Un Tour compte au moins 3 étapes.")
-            return
-        self.on_next(list(self.order), self.rest_after())
 
 
 # ---------------------------------------------------------------------- résultats

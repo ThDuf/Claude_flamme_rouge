@@ -435,7 +435,8 @@ class App:
         if self._podium_visible():
             self._paint_podium()
             self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
-                                                         weather=self.game.weather))
+                                                         weather=self.game.weather, tokens=self.game.tokens,
+                                                     jerseys=self.game.jerseys))
             return
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
         shapes = map_primitives(
@@ -446,7 +447,8 @@ class App:
         )
         self._paint(self.board, shapes)
         self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
-                                                     weather=self.game.weather))
+                                                     weather=self.game.weather, tokens=self.game.tokens,
+                                                     jerseys=self.game.jerseys))
         self._paint_weather_fx()
 
     WEATHER_FX_MS = 60
