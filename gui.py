@@ -21,6 +21,9 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
+from flamme_rouge.boardview import FOLLOW_HEAD, FOLLOW_PELOTON, follow_view, jersey_primitives
+from flamme_rouge.stage import MOUNTAIN, SPRINT, format_time
+from flamme_rouge.tour import GREEN, POLKA, YELLOW
 from flamme_rouge.boardview import podium_primitives, profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
@@ -63,15 +66,26 @@ ACTION_TEXT = {
 
 PROFILE_H = 100
 WINDOW_W, WINDOW_H = 1040, 985
+TOUR_PANEL_W = 230  # Grand Tour : largeur du panneau des jetons et des temps
+PANEL_PER_ROW = 4  # pastilles par ligne dans ce panneau
+SIDE_PANEL_W = 330  # ce panneau quand il est à droite de la carte (écran large)
+CAMERA_ALL = "tout"
+CAMERA_CHOICES = [(CAMERA_ALL, "Tout le parcours"), (FOLLOW_PELOTON, "Zoom peloton"), (FOLLOW_HEAD, "Zoom tête de course")]
 
 
 class App:
     def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True,
-                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False):
+                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False, game=None, on_stage_end=None,
+                 stage_title: str = ""):
+        """`game` : une partie déjà préparée (étape d'un Grand Tour) ; `on_stage_end()` est appelé quand on clique
+        sur « Résultats de l'étape » à la fin d'une étape de Tour ; `stage_title` s'affiche dans la fenêtre."""
         self.parent = root  # conteneur où l'on dessine (la fenêtre, ou un cadre quand on vient du menu)
         self.root = root.winfo_toplevel()  # la fenêtre elle-même : titre, minuteur, fenêtres annexes
         self.root.title("Flamme Rouge")
-        self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
+        self.game = game or Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
+        self.on_stage_end = on_stage_end
+        if stage_title:
+            self.root.title(f"Flamme Rouge — {stage_title}")
         self.ctl = TurnController(self.game, ai_teams, breakaway)  # `ai_teams` : jouées par l'IA
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
@@ -87,6 +101,8 @@ class App:
         self.podium_job = None
         self.fx_start = time.monotonic()
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
+        # caméra : "tout" (le parcours entier), "peloton" ou "tete" (suit ce groupe), "" (cadrage manuel)
+        self.camera_var = tk.StringVar(value=CAMERA_ALL)
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
         self._build()
         self.refresh()
@@ -121,8 +137,22 @@ class App:
         tk.Frame(root, bg=pal.ACCENT, height=2).pack(fill="x")
 
         # ----- la carte
-        board_card = ui.card(root)
-        board_card.pack(padx=14, pady=(12, 0))
+        # Grand Tour sur un écran assez large : le panneau des jetons et maillots à droite de la carte
+        self.side_panel = bool(self.game.tour) and self.root.winfo_screenwidth() >= WINDOW_W + SIDE_PANEL_W + 60
+        if self.side_panel:
+            ui.place_window(self.root, WINDOW_W + SIDE_PANEL_W + 14, WINDOW_H)
+            middle = tk.Frame(root, bg=pal.BG)
+            middle.pack(fill="x", padx=14, pady=(12, 0))
+            board_card = ui.card(middle)
+            board_card.pack(side="left")
+            side_card = ui.card(middle)
+            side_card.pack(side="left", fill="y", padx=(14, 0))
+            self.tour_panel = tk.Frame(side_card, bg=pal.CARD, width=SIDE_PANEL_W - 22)
+            self.tour_panel.pack(fill="both", expand=True, padx=10, pady=8)
+            self.tour_panel.pack_propagate(False)  # largeur fixe : la carte garde sa place
+        else:
+            board_card = ui.card(root)
+            board_card.pack(padx=14, pady=(12, 0))
         self.board = tk.Canvas(board_card, width=BOARD_W, height=MAP_H, bg=pal.GRASS, highlightthickness=0)
         self.board.pack(padx=1, pady=1)
         self.board.bind("<ButtonPress-1>", self.on_press)
@@ -138,15 +168,12 @@ class App:
         bar.pack(fill="x", padx=14, pady=(8, 0))
         ui.FlatButton(bar, "＋", lambda: self.zoom_at(1.4), size=11, padx=12, pady=4).pack(side="left")
         ui.FlatButton(bar, "－", lambda: self.zoom_at(1 / 1.4), size=11, padx=12, pady=4).pack(side="left", padx=(4, 0))
-        ui.FlatButton(bar, "Vue auto", self.reset_view, size=9, style="ghost", padx=10, pady=5).pack(side="left", padx=(4, 0))
-        tk.Label(bar, text="molette = zoom · glisser = déplacer · clic = passer l'animation", font=ui.font(8), bg=pal.BG, fg=pal.FAINT).pack(
-            side="left", padx=10
-        )
+        ui.Segmented(bar, CAMERA_CHOICES, self.camera_var, command=self.set_camera).pack(side="left", padx=(10, 0))
+        tk.Label(bar, text="molette = zoom · glisser = déplacer\nclic = passer l'animation", font=ui.font(8), bg=pal.BG,
+                 fg=pal.FAINT, justify="left").pack(side="left", padx=10)
         ui.Toggle(bar, "Mode secret", self.secret_var, command=self.refresh).pack(side="right")
         ui.Toggle(bar, "Animations", self.animate_var).pack(side="right")
 
-        self.standings_frame = tk.Frame(root, bg=pal.BG)
-        self.standings_frame.pack(fill="x", padx=14, pady=(8, 0))
         self.cards_frame = tk.Frame(root, bg=pal.BG)  # cartes révélées au dernier mouvement
         self.cards_frame.pack(fill="x", padx=14, pady=(6, 0))
 
@@ -157,6 +184,14 @@ class App:
         hand_card.pack(side="left", fill="y", anchor="n")
         self.hand_frame = tk.Frame(hand_card, bg=pal.CARD)
         self.hand_frame.pack(padx=16, pady=14)
+
+        if not self.side_panel:
+            self.tour_panel = None
+        if self.game.tour and not self.side_panel:  # petit écran : le panneau du Tour sous la carte, à droite
+            panel_card = ui.card(bottom)
+            panel_card.pack(side="right", fill="y", padx=(14, 0))
+            self.tour_panel = tk.Frame(panel_card, bg=pal.CARD, width=TOUR_PANEL_W)
+            self.tour_panel.pack(fill="both", expand=True, padx=10, pady=8)
 
         right = tk.Frame(bottom, bg=pal.BG)
         right.pack(side="right", fill="both", expand=True, padx=(14, 0))
@@ -194,6 +229,10 @@ class App:
         if self.anim is not None:
             return
         phase = self.ctl.phase
+        if phase == FINISHED and self.on_stage_end is not None:  # Grand Tour : écran des résultats de l'étape
+            self.close()
+            self.on_stage_end()
+            return
         before = snapshot(self.game.riders)
         self.ctl.advance()
         self.revealed = False
@@ -215,7 +254,7 @@ class App:
         """Cadrage automatique, recentré sur le milieu des coureurs : point de départ des boutons ＋ et －."""
         scale, _cx, _cy = self._auto_view()
         squares = layout_squares(self.game.track)
-        points = [point_on_road(squares, r.position, r.lane) for r in self.game.riders]
+        points = [point_on_road(squares, r.position, r.lane) for r in self.game.riders] or [point_on_road(squares, 0, 0)]
         return scale, sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
 
     def zoom_at(self, factor: float, x=None, y=None) -> None:
@@ -229,14 +268,26 @@ class App:
         else:
             base = self.view or self._auto_view()
         self.view = zoom_view(base, factor, x, y)
+        self.camera_var.set("")  # zoom à la main : on ne suit plus de groupe
         self._paint_map()
 
     def on_wheel(self, event) -> None:
         self.zoom_at(1.25 if event.delta > 0 else 0.8, event.x, event.y)
 
     def reset_view(self) -> None:
+        self.camera_var.set(CAMERA_ALL)
+        self.set_camera()
+
+    def set_camera(self) -> None:
+        """Choix de la caméra : tout le parcours, ou un zoom qui suit le peloton / la tête de course."""
         self.view = None
         self._paint_map()
+
+    def _follow_camera(self) -> None:
+        """Caméra de suivi : recadre sur le groupe suivi (appelé à chaque dessin de la carte)."""
+        which = self.camera_var.get()
+        if which in (FOLLOW_PELOTON, FOLLOW_HEAD):
+            self.view = follow_view(self.game, which)  # None (plus personne en course) : tout le parcours
 
     def on_press(self, event) -> None:
         self._drag = [event.x, event.y, False]
@@ -249,6 +300,7 @@ class App:
             return
         self._drag = [event.x, event.y, True]
         self.view = pan_view(self.view or self._auto_view(), dx, dy)
+        self.camera_var.set("")  # déplacement à la main : on ne suit plus de groupe
         self._paint_map()
 
     def on_release(self, _event) -> None:
@@ -272,8 +324,8 @@ class App:
     def _team_names(self) -> list[str]:
         """« Équipe 2 · IA », « Équipe 3 · Peloton »… pour l'écran de victoire."""
         names = []
-        for team in range(max(r.team for r in self.game.riders) + 1):
-            rider = next(r for r in self.game.riders if r.team == team)
+        for team in range(max(r.team for r in self.game.all_riders) + 1):
+            rider = next(r for r in self.game.all_riders if r.team == team)
             who = self.ctl.controller_of(rider)
             names.append(f"Équipe {team + 1}" + ("" if who == "Joueur" else f" · {who}"))
         return names
@@ -406,15 +458,16 @@ class App:
         self.info_label.config(text=PHASE_INFO[phase])
 
         self._paint_map()
-        if self.anim is None:  # le classement se met à jour une fois les coureurs arrivés
-            self._show_standings()
+        if self.anim is None:  # le panneau du Tour se met à jour une fois les coureurs arrivés
+            self._show_tour_panel()
         self._show_revealed_cards()
 
         self._show_hand()
         self._refresh_decks()
+        tour_end = phase == FINISHED and self.on_stage_end is not None
         self.action_btn.config(
-            text=ACTION_TEXT[phase],
-            state="normal" if phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION) and self.anim is None else "disabled",
+            text="▶ Résultats de l'étape et classements" if tour_end else ACTION_TEXT[phase],
+            state="normal" if (phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION) or tour_end) and self.anim is None else "disabled",
         )
         self._flush_log()
 
@@ -424,9 +477,11 @@ class App:
         if self._podium_visible():
             self._paint_podium()
             self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
-                                                         weather=self.game.weather))
+                                                         weather=self.game.weather, tokens=self.game.tokens,
+                                                     jerseys=self.game.jerseys))
             return
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
+        self._follow_camera()
         shapes = map_primitives(
             self.game,
             self.ctl.current_rider,
@@ -435,7 +490,8 @@ class App:
         )
         self._paint(self.board, shapes)
         self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
-                                                     weather=self.game.weather))
+                                                     weather=self.game.weather, tokens=self.game.tokens,
+                                                     jerseys=self.game.jerseys))
         self._paint_weather_fx()
 
     WEATHER_FX_MS = 60
@@ -462,17 +518,132 @@ class App:
         canvas.delete("all")
         ui.paint(canvas, shapes)
 
-    def _show_standings(self) -> None:
-        for widget in self.standings_frame.winfo_children():
+    def _show_tour_panel(self) -> None:
+        """Grand Tour : les jetons Sprint (maillot vert) et Montagne (à pois) gagnés pendant l'étape, puis les
+        temps (jetons Temps d'une minute, arrivées). Au survol, l'infobulle dit pourquoi."""
+        panel = self.tour_panel
+        if panel is None:
+            return
+        for widget in panel.winfo_children():
             widget.destroy()
-        order = sorted(self.game.riders, key=lambda r: (-r.position, r.lane))
-        tk.Label(self.standings_frame, text="CLASSEMENT", font=ui.font(8, True), bg=pal.BG, fg=pal.FAINT).pack(side="left", padx=(0, 6))
-        for place, rider in enumerate(order, 1):
-            chip = tk.Frame(self.standings_frame, bg=pal.CARD, highlightbackground=pal.BORDER, highlightthickness=1)
-            chip.pack(side="left", padx=(0, 3))
-            tk.Label(chip, text=f"{place}", font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, padx=3).pack(side="left")
-            tk.Label(chip, text=rider.name, font=ui.font(9, True), bg=pal.TEAM_FILL[rider.team], fg=pal.LABEL_ON_FILL[rider.team], padx=4).pack(side="left", pady=2)
-            tk.Label(chip, text=f"{rider.position}", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, padx=3).pack(side="left")
+        g = self.game
+        wrap = SIDE_PANEL_W - 44 if self.side_panel else TOUR_PANEL_W - 10
+        per_row = 5 if self.side_panel else PANEL_PER_ROW
+
+        def heading(text: str, top: int = 8) -> None:
+            tk.Label(panel, text=text, font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, anchor="w").pack(
+                fill="x", pady=(top, 2))
+
+        def rider_chip(parent, rider) -> None:
+            tk.Label(parent, text=rider.name, font=ui.font(8, True), bg=pal.TEAM_FILL[rider.team],
+                     fg=pal.LABEL_ON_FILL[rider.team], padx=3).pack(side="left", padx=(4, 0))
+
+        def jersey_icon(parent, kind, value=None, bg=pal.CARD) -> None:
+            icon = tk.Canvas(parent, width=20, height=20, bg=bg, highlightthickness=0)
+            ui.paint(icon, jersey_primitives(10, 10, 18, kind, value))
+            icon.pack(side="left")
+
+        if self.side_panel:
+            self._side_panel_standings(panel, heading, rider_chip, jersey_icon)
+        for kind, title in ((SPRINT, "SPRINT DE L'ÉTAPE · MAILLOT VERT"), (MOUNTAIN, "MONTAGNE DE L'ÉTAPE · À POIS")):
+            heading(title, 0 if kind == SPRINT and not self.side_panel else 4)
+            wins = [w for w in g.token_log if w.kind == kind]
+            if not wins:
+                left = [s for s in g.tokens if s.kind == kind and s.values]
+                text = ("à prendre : " + ", ".join(f"case {s.square} ({'·'.join(map(str, s.values))})" for s in left)
+                        if left else "aucun jeton")
+                tk.Label(panel, text=text, font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, anchor="w", justify="left",
+                         wraplength=wrap).pack(fill="x")
+                continue
+            row = None
+            for i, win in enumerate(wins):
+                if i % per_row == 0:
+                    row = tk.Frame(panel, bg=pal.CARD)
+                    row.pack(fill="x", pady=1)
+                chip = tk.Frame(row, bg=pal.CARD_HI, cursor="question_arrow")
+                chip.pack(side="left", padx=(0, 4))
+                icon = tk.Canvas(chip, width=20, height=20, bg=pal.CARD_HI, highlightthickness=0)
+                ui.paint(icon, jersey_primitives(10, 10, 18, kind, win.value))
+                icon.pack(side="left")
+                rider_chip(chip, win.rider)
+                ui.Tooltip(chip, win.reason())
+
+        heading("TEMPS", 4)
+        times = tk.Frame(panel, bg=pal.CARD)
+        times.pack(fill="x")
+        shown = 0
+        for rider in g.arrived:  # arrivés : leur temps d'étape
+            arrival = g.arrival_log.get(rider)
+            chip = tk.Frame(times, bg=pal.CARD_HI, cursor="question_arrow")
+            chip.grid(row=shown // per_row, column=shown % per_row, sticky="w", padx=(0, 4), pady=1)
+            rider_chip(chip, rider)
+            tk.Label(chip, text=format_time(g.stage_time[rider]), font=ui.font(8, True), bg=pal.CARD_HI,
+                     fg=pal.GOOD, padx=3).pack(side="left")
+            if arrival is not None:
+                ui.Tooltip(chip, arrival.reason())
+            shown += 1
+        for rider in g.riders:  # encore en course : jetons Temps déjà pris
+            minutes = g.minutes.get(rider, 0)
+            if not minutes:
+                continue
+            chip = tk.Frame(times, bg=pal.CARD_HI, cursor="question_arrow")
+            chip.grid(row=shown // per_row, column=shown % per_row, sticky="w", padx=(0, 4), pady=1)
+            rider_chip(chip, rider)
+            tk.Label(chip, text=f"⏱ {minutes}'", font=ui.font(8, True), bg=pal.CARD_HI, fg=pal.TEXT, padx=3).pack(
+                side="left")
+            ui.Tooltip(chip, f"{rider.name} n'a pas encore passé la ligne : {minutes} jeton(s) Temps d'une minute.\n"
+                             "Après la première arrivée, chaque coureur pas encore arrivé en prend un à la fin "
+                             "de chaque tour.")
+            shown += 1
+        if not shown:
+            tk.Label(times, text="jetons Temps : dès qu'un coureur passe la ligne, chacun des autres prend 1 minute "
+                                 "par tour", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, anchor="w", justify="left",
+                     wraplength=wrap).grid(row=0, column=0, sticky="w")
+
+    def _side_panel_standings(self, panel, heading, rider_chip, jersey_icon) -> None:
+        """Panneau large du Grand Tour : maillots du général, haut du classement général, derniers points pris."""
+        g = self.game
+        info = g.tour_standings or {}
+        stage = f"ÉTAPE {info['stage']}/{info['stages']} · " if info else ""
+        heading(stage + "MAILLOTS (AVANT L'ÉTAPE)", 0)
+        jerseys = info.get("jerseys", [])
+        if not jerseys:
+            tk.Label(panel, text="Premiers maillots à la fin de cette étape.", font=ui.font(8), bg=pal.CARD,
+                     fg=pal.MUTED, anchor="w").pack(fill="x")
+        names = {YELLOW: "Jaune", GREEN: "Vert", POLKA: "À pois"}
+        for jersey, rider, detail in jerseys:
+            row = tk.Frame(panel, bg=pal.CARD)
+            row.pack(fill="x", pady=1)
+            jersey_icon(row, jersey)
+            tk.Label(row, text=names.get(jersey, jersey), font=ui.font(8, True), bg=pal.CARD, fg=pal.TEXT, width=6,
+                     anchor="w").pack(side="left", padx=(4, 0))
+            rider_chip(row, rider)
+            tk.Label(row, text=detail, font=ui.font(8), bg=pal.CARD, fg=pal.MUTED).pack(side="left", padx=(6, 0))
+        gc = info.get("gc", [])
+        if gc:
+            heading("CLASSEMENT GÉNÉRAL")
+            for place, (rider, total, gap) in enumerate(gc, 1):
+                row = tk.Frame(panel, bg=pal.CARD)
+                row.pack(fill="x")
+                tk.Label(row, text=f"{place}.", font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, width=2,
+                         anchor="e").pack(side="left")
+                rider_chip(row, rider)
+                tk.Label(row, text=total, font=ui.font(8, True), bg=pal.CARD, fg=pal.TEXT).pack(side="left", padx=(6, 0))
+                tk.Label(row, text=gap, font=ui.font(8), bg=pal.CARD, fg=pal.MUTED).pack(side="left", padx=(6, 0))
+        heading("DERNIERS POINTS DE L'ÉTAPE")
+        recent = list(reversed(g.token_log))[:4]
+        if not recent:
+            tk.Label(panel, text="Personne n'a encore pris de jeton.", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED,
+                     anchor="w").pack(fill="x")
+        for win in recent:
+            row = tk.Frame(panel, bg=pal.CARD, cursor="question_arrow")
+            row.pack(fill="x", pady=1)
+            jersey_icon(row, win.kind, win.value)
+            rider_chip(row, win.rider)
+            what = "Sprint" if win.kind == SPRINT else "Montagne"
+            tk.Label(row, text=f"+{win.value} {what} · tour {win.turn}, case {win.square}", font=ui.font(8),
+                     bg=pal.CARD, fg=pal.TEXT).pack(side="left", padx=(6, 0))
+            ui.Tooltip(row, win.reason())
 
     def _show_revealed_cards(self) -> None:
         """Les cartes jouées au dernier mouvement par chaque coureur, avec qui le joue (Joueur, IA, Peloton,

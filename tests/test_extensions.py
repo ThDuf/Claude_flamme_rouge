@@ -5,7 +5,7 @@ from flamme_rouge.game import Game
 
 
 def test_known_extensions():
-    assert set(EXTENSIONS) == {PELOTON, METEO}
+    assert set(EXTENSIONS) == {PELOTON, METEO}  # le Grand Tour est un type de course, pas une extension
     assert check_extensions([METEO]) == frozenset({METEO})
     with pytest.raises(ValueError):
         check_extensions(["bidon"])
