@@ -19,7 +19,7 @@ from .cards import (
 )
 from .extensions import METEO, PELOTON, check_extensions
 from .rider import Rider
-from .track import ASCENT, COBBLES, DESCENT, SUPPLY, Track
+from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, SUPPLY, Track
 from .weather import Weather, WeatherZone, draw_weather
 
 HAND_SIZE = 4
@@ -28,6 +28,8 @@ SUPPLY_SPEED = 4  # extension Peloton : minimum quand on part d'une zone de ravi
 MAX_PER_SQUARE = 2  # files d'une case ordinaire (voir Track.lanes pour les autres)
 CRASH_PENALTY = 2  # extension Météo : un coureur qui se relève avance de 2 cases de moins
 BASE_MAX_TEAMS, PELOTON_MAX_TEAMS = 4, 6
+BID_ROUNDS = 2  # variante Échappée : deux enchères par coureur
+BREAKAWAY_FATIGUE = 2  # cartes Fatigue prises par chaque échappé
 
 # Qui joue une équipe (l'IA, elle, joue avec les règles d'un joueur : voir controller.py)
 TEAM_PLAYER = "joueur"
@@ -169,6 +171,54 @@ class Game:
     def is_ghost(self, rider: Rider) -> bool:
         """Coureur d'une équipe fantôme (Peloton ou Muscle) : il retourne une carte, sans choisir."""
         return self.team_types[rider.team] in GHOSTS
+
+    # ------------------------------------------------- 0. Variante Échappée (extension Peloton)
+
+    def breakaway_squares(self) -> list[int]:
+        """Cases de la zone d'échappée (tuile 2), de l'avant vers l'arrière ; vide sans tuile Échappée."""
+        return sorted((s for s in range(len(self.track)) if self.track.surface(s) == BREAKAWAY), reverse=True)
+
+    def breakaway_winners_count(self) -> int:
+        """Un échappé de 2 à 4 équipes, deux à 5–6 équipes."""
+        return 2 if len(self.team_types) >= 5 else 1
+
+    def draw_bid_hand(self, rider: Rider) -> list[Card]:
+        """Enchère : 4 cartes du paquet du coureur choisi (les autres retourneront à la défausse)."""
+        hand = rider.draw_hand(HAND_SIZE, self.rng)
+        rider.hand = list(hand)
+        return hand
+
+    def put_bid(self, rider: Rider, hand: list[Card], card: Card) -> Card:
+        """Pose la carte misée (mise de côté) et défausse les autres cartes de la main."""
+        if card not in hand:
+            raise ValueError(f"{card} n'est pas dans la main de {rider.name} : {hand}")
+        rest = list(hand)
+        rest.remove(card)
+        rider.recycle.extend(rest)
+        rider.hand = []
+        return card
+
+    def resolve_breakaway(self, bids: dict[Rider, list[Card]]) -> list[Rider]:
+        """Fin des enchères : le ou les meilleurs totaux partent dans la zone d'échappée (le plus haut à droite).
+        Égalité : le coureur le plus en arrière, puis le plus à gauche, l'emporte.
+
+        Les échappés retirent leurs cartes misées du jeu et prennent 2 cartes Fatigue dans leur défausse ; les
+        autres défaussent leurs mises. Puis le paquet de chaque enchérisseur est remélangé avec sa défausse."""
+        ranked = sorted(bids, key=lambda r: (-sum(c.value for c in bids[r]), r.position, -r.lane))
+        winners = ranked[: self.breakaway_winners_count()] if self.breakaway_squares() else []
+        for rider, cards in bids.items():
+            if rider in winners:
+                rider.used.extend(cards)
+                rider.recycle.extend(exhaustion_card() for _ in range(BREAKAWAY_FATIGUE))
+            else:
+                rider.recycle.extend(cards)
+            rider.draw_pile.extend(rider.recycle)
+            rider.recycle = []
+            self.rng.shuffle(rider.draw_pile)
+        slots = [(s, lane) for s in self.breakaway_squares() for lane in range(self.lanes(s))]
+        for rider, (square, lane) in zip(winners, slots):
+            rider.position, rider.lane = square, lane
+        return winners
 
     # ------------------------------------------------------------- 1. Énergie
 

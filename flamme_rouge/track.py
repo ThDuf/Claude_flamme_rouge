@@ -20,6 +20,7 @@ DESCENT = "D"
 
 COBBLES = "paves"
 SUPPLY = "ravito"
+BREAKAWAY = "echappee"  # zone d'échappée de la tuile 2 (on y place les coureurs échappés)
 DEFAULT_LANES = 2
 
 STRAIGHT = "S"

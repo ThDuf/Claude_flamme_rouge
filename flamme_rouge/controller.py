@@ -1,6 +1,7 @@
 """Déroulement d'un tour étape par étape, sans aucune interface.
 
 Une interface (texte ou graphique) n'a qu'à appeler :
+  - (variante Échappée) choose_bid_rider(coureur ou None) puis choose(carte) tant que phase == BREAKAWAY ;
   - choose(carte) tant que phase == CHOOSE ;
   - advance() pour passer à la phase suivante (mouvement, aspiration, fatigue).
 Les événements à afficher s'accumulent dans `log` (voir drain_log).
@@ -10,12 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from .ai import choose_card
+from .ai import bid_card, breakaway_rider, choose_card
 from .cards import ATTACK, Card
-from .game import Game
+from .game import BID_ROUNDS, Game
 from .track import DESCENT
 from .rider import Rider
 
+BREAKAWAY = "breakaway"  # variante Échappée : enchères avant le premier tour
 CHOOSE = "choose"  # chaque coureur choisit sa carte
 MOVEMENT = "movement"  # cartes posées, prêt pour le mouvement
 SLIPSTREAM = "slipstream"  # mouvement fait, prêt pour l'aspiration
@@ -37,8 +39,9 @@ def describe(card: Card) -> str:
 
 
 class TurnController:
-    def __init__(self, game: Game, ai_teams: Iterable[int] = ()):
-        """`ai_teams` : numéros des équipes jouées par l'IA (0 = première équipe) ; leurs cartes sont choisies seules."""
+    def __init__(self, game: Game, ai_teams: Iterable[int] = (), breakaway: bool = False):
+        """`ai_teams` : numéros des équipes jouées par l'IA (0 = première équipe) ; leurs cartes sont choisies seules.
+        `breakaway` : variante Échappée (extension Peloton), seulement si le parcours a une tuile Échappée."""
         self.game = game
         self.ai_teams = frozenset(ai_teams)
         # cartes révélées au dernier mouvement (toutes les équipes) et numéro de ce tour : pour les afficher
@@ -50,13 +53,105 @@ class TurnController:
         self.played: dict[Rider, Card] = {}
         self.index = 0  # coureur en train de choisir
         self.hand: list[Card] = []
-        self._begin_turn()
+        # variante Échappée : équipes qui peuvent enchérir (pas les fantômes), équipe en cours, coureur choisi, mises
+        self.bid_teams = [t for t in range(len(game.team_types))
+                          if not game.is_ghost(next(r for r in game.riders if r.team == t))]
+        self.bid_index = 0
+        self.bid_rider: Optional[Rider] = None
+        self.bids: dict[Rider, list[Card]] = {}
+        self.breakaway_winners: list[Rider] = []
+        if breakaway and game.breakaway_squares():
+            self._start_breakaway()
+        else:
+            self._begin_turn()
 
     @property
     def current_rider(self) -> Optional[Rider]:
         if self.phase == CHOOSE:
             return self.game.riders[self.index]
+        if self.phase == BREAKAWAY:
+            return self.bid_rider
         return None
+
+    # ------------------------------------------------------- variante Échappée
+
+    @property
+    def bid_team(self) -> Optional[int]:
+        """Équipe qui enchérit en ce moment (variante Échappée)."""
+        if self.phase != BREAKAWAY or self.bid_index >= len(self.bid_teams):
+            return None
+        return self.bid_teams[self.bid_index]
+
+    @property
+    def bid_round(self) -> int:
+        """Numéro de l'enchère en cours pour le coureur choisi (1 ou 2)."""
+        return len(self.bids.get(self.bid_rider, [])) + 1 if self.bid_rider else 1
+
+    def _start_breakaway(self) -> None:
+        self.phase = BREAKAWAY
+        self.log.append(LogLine("ÉCHAPPÉE : ENCHÈRES", heading=True))
+        self._next_bidder()
+
+    def _next_bidder(self) -> None:
+        """Passe à l'équipe suivante ; l'IA enchérit toute seule ; à la fin, on résout l'échappée."""
+        while self.bid_index < len(self.bid_teams):
+            team = self.bid_teams[self.bid_index]
+            if team not in self.ai_teams:
+                return  # un joueur choisit son coureur (ou passe) à l'écran
+            rider = breakaway_rider(self.game, team)
+            self.log.append(LogLine(f"{rider.name} (IA) tente l'échappée", team))
+            self.bids[rider] = []
+            for _ in range(BID_ROUNDS):
+                hand = self.game.draw_bid_hand(rider)
+                self.bids[rider].append(self.game.put_bid(rider, hand, bid_card(hand)) if hand else Card(0))
+            self.bid_index += 1
+        self._resolve_breakaway()
+
+    def choose_bid_rider(self, rider: Optional[Rider]) -> None:
+        """Le joueur choisit le coureur qui tente l'échappée, ou None pour ne pas participer."""
+        team = self.bid_team
+        if team is None:
+            raise RuntimeError("Ce n'est pas le moment des enchères.")
+        if rider is None:
+            self.log.append(LogLine(f"Équipe {team + 1} ne participe pas à l'échappée", team))
+            self.bid_index += 1
+            self._next_bidder()
+            return
+        if rider.team != team:
+            raise ValueError("Ce coureur n'est pas de l'équipe qui enchérit.")
+        self.bid_rider = rider
+        self.bids[rider] = []
+        self.log.append(LogLine(f"{rider.name} tente l'échappée", team))
+        self.hand = self.game.draw_bid_hand(rider)
+        if not self.hand:
+            self._bid(None)
+
+    def _bid(self, card: Optional[Card]) -> None:
+        rider = self.bid_rider
+        self.bids[rider].append(self.game.put_bid(rider, self.hand, card) if card is not None else Card(0))
+        if len(self.bids[rider]) < BID_ROUNDS:
+            self.hand = self.game.draw_bid_hand(rider)
+            if not self.hand:
+                self._bid(None)
+            return
+        self.bid_rider, self.hand = None, []
+        self.bid_index += 1
+        self._next_bidder()
+
+    def _resolve_breakaway(self) -> None:
+        g = self.game
+        for rider, cards in sorted(self.bids.items(), key=lambda kv: -sum(c.value for c in kv[1])):
+            total = sum(c.value for c in cards)
+            self.log.append(LogLine(f"{rider.name} mise {' + '.join(str(c.value) for c in cards)} = {total}", rider.team))
+        self.breakaway_winners = g.resolve_breakaway(self.bids) if self.bids else []
+        for rider in self.breakaway_winners:
+            self.log.append(LogLine(f"{rider.name} part en échappée (case {rider.position}) : 2 cartes Fatigue", rider.team))
+        if self.bids and not self.breakaway_winners:
+            self.log.append(LogLine("Pas de tuile Échappée sur ce parcours : personne ne part."))
+        if not self.bids:
+            self.log.append(LogLine("Personne n'a tenté l'échappée."))
+        self.bids = {}
+        self._begin_turn()
 
     def controller_of(self, rider: Rider) -> str:
         """Qui joue ce coureur : « Joueur », « IA », « Peloton » ou « Muscle »."""
@@ -110,6 +205,11 @@ class TurnController:
         self.phase = MOVEMENT
 
     def choose(self, card: Card) -> None:
+        if self.phase == BREAKAWAY and self.bid_rider is not None:  # carte misée pour l'échappée
+            if card not in self.hand:
+                raise ValueError(f"{card} n'est pas dans la main.")
+            self._bid(card)
+            return
         if self.phase != CHOOSE:
             raise RuntimeError("Ce n'est pas le moment de choisir une carte.")
         rider = self.game.riders[self.index]

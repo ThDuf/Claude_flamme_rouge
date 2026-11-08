@@ -24,6 +24,7 @@ from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, 
 from flamme_rouge.boardview import podium_primitives, profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
+    BREAKAWAY,
     CHOOSE,
     EXHAUSTION,
     FINISHED,
@@ -35,6 +36,7 @@ from flamme_rouge.decks import deck_text
 from flamme_rouge.tiles import load_track_file
 
 PHASE_TITLES = {
+    BREAKAWAY: "enchères de l'échappée",
     CHOOSE: "choix des cartes",
     MOVEMENT: "cartes posées",
     SLIPSTREAM: "mouvement terminé",
@@ -42,6 +44,7 @@ PHASE_TITLES = {
     FINISHED: "partie terminée",
 }
 PHASE_INFO = {
+    BREAKAWAY: "Chaque équipe mise deux cartes d'un coureur, ou passe : le meilleur total part devant.",
     CHOOSE: "Chaque coureur choisit une carte parmi 4. Le coureur entouré d'un halo doré est en train de choisir.",
     MOVEMENT: "Toutes les cartes sont posées. Clique sur le bouton pour les révéler et lancer le mouvement.",
     SLIPSTREAM: "Regarde le plateau, puis lance l'aspiration.",
@@ -49,6 +52,7 @@ PHASE_INFO = {
     FINISHED: "Clic sur le podium pour revoir la course ; retourne au menu pour refaire une partie.",
 }
 ACTION_TEXT = {
+    BREAKAWAY: "Enchères de l'échappée…",
     CHOOSE: "Choisis les cartes…",
     MOVEMENT: "▶ Révéler les cartes : MOUVEMENT",
     SLIPSTREAM: "▶ ASPIRATION",
@@ -58,17 +62,17 @@ ACTION_TEXT = {
 
 
 PROFILE_H = 100
-WINDOW_W, WINDOW_H = 1040, 960
+WINDOW_W, WINDOW_H = 1040, 985
 
 
 class App:
     def __init__(self, root, teams: int = 2, seed=None, secret: bool = False, track=None, on_menu=None, animate: bool = True,
-                 extensions=(), ai_teams=(), team_types=None):
+                 extensions=(), ai_teams=(), team_types=None, breakaway: bool = False):
         self.parent = root  # conteneur où l'on dessine (la fenêtre, ou un cadre quand on vient du menu)
         self.root = root.winfo_toplevel()  # la fenêtre elle-même : titre, minuteur, fenêtres annexes
         self.root.title("Flamme Rouge")
         self.game = Game(track=track, num_teams=teams, seed=seed, extensions=extensions, team_types=team_types)
-        self.ctl = TurnController(self.game, ai_teams)  # les équipes de `ai_teams` sont jouées par l'IA
+        self.ctl = TurnController(self.game, ai_teams, breakaway)  # `ai_teams` : jouées par l'IA
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
         self.animate_var = tk.BooleanVar(value=animate)
@@ -106,7 +110,8 @@ class App:
         self.turn_badge.pack(side="left")
         self.title_label = tk.Label(line, text="", font=ui.font(16, True), bg=pal.PANEL, fg=pal.TEXT)
         self.title_label.pack(side="left", padx=(12, 0))
-        self.info_label = tk.Label(left, text="", font=ui.font(10), bg=pal.PANEL, fg=pal.MUTED, anchor="w")
+        self.info_label = tk.Label(left, text="", font=ui.font(10), bg=pal.PANEL, fg=pal.MUTED, anchor="w",
+                                   justify="left", wraplength=520)  # passe à la ligne : la fenêtre reste à sa largeur
         self.info_label.pack(anchor="w", pady=(4, 0))
         tools = tk.Frame(top, bg=pal.PANEL)
         tools.pack(side="right", padx=18)
@@ -159,7 +164,8 @@ class App:
         self.action_btn.pack(fill="x", pady=(0, 8))
         log_frame = tk.Frame(right, bg=pal.BG)
         log_frame.pack(fill="both", expand=True)
-        self.log = tk.Text(log_frame, height=6, wrap="word", state="disabled", font=ui.font(10))
+        # largeur minimale modeste : le journal prend la place qui reste à côté de la main
+        self.log = tk.Text(log_frame, width=40, height=6, wrap="word", state="disabled", font=ui.font(10))
         ui.style_text(self.log)
         self.log.pack(fill="both", expand=True)
         self.log.tag_configure("heading", font=ui.font(10, True), foreground=pal.TEXT, spacing1=6)
@@ -177,6 +183,10 @@ class App:
         nxt = self.ctl.current_rider
         if nxt is None or nxt.kind == ROULEUR:
             self.revealed = False
+        self.refresh()
+
+    def _bid_rider(self, rider) -> None:
+        self.ctl.choose_bid_rider(rider)
         self.refresh()
 
     def on_action(self) -> None:
@@ -497,6 +507,19 @@ class App:
             widget.destroy()
         frame = self.hand_frame
         rider = self.ctl.current_rider
+        if self.ctl.phase == BREAKAWAY and rider is None:  # l'équipe choisit son coureur, ou passe
+            team = self.ctl.bid_team
+            tk.Label(frame, text=f"Échappée · Équipe {team + 1}", font=ui.font(13, True), bg=pal.CARD,
+                     fg=pal.TEAM_TEXT[team]).pack(anchor="w")
+            tk.Label(frame, text="Quel coureur tente l'échappée ? (2 cartes misées, 2 cartes Fatigue s'il part)",
+                     font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(6, 8))
+            row = tk.Frame(frame, bg=pal.CARD)
+            row.pack(anchor="w")
+            for candidate in (r for r in self.game.riders if r.team == team):
+                ui.FlatButton(row, f"{candidate.name} · {candidate.kind}", lambda r=candidate: self._bid_rider(r),
+                              style="primary", size=11).pack(side="left", padx=(0, 6))
+            ui.FlatButton(row, "Ne pas participer", lambda: self._bid_rider(None), size=11, style="ghost").pack(side="left")
+            return
         if rider is None:
             tk.Label(frame, text="Les cartes sont posées.", font=ui.font(12), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w")
             return
@@ -515,8 +538,12 @@ class App:
             ui.FlatButton(frame, f"Équipe {rider.team + 1} prête : afficher ma main", self._reveal, style="primary", size=11).pack(anchor="w")
             return
 
-        ahead = " ".join(terrain_text(self.game, s) for s in range(rider.position + 1, rider.position + 11))
-        tk.Label(frame, text=f"Devant toi :  {ahead}", font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
+        if self.ctl.phase == BREAKAWAY:
+            tk.Label(frame, text=f"Enchère {self.ctl.bid_round} sur 2 : la carte à miser (les autres vont à la défausse)",
+                     font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
+        else:
+            ahead = " ".join(terrain_text(self.game, s) for s in range(rider.position + 1, rider.position + 11))
+            tk.Label(frame, text=f"Devant toi :  {ahead}", font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
         row = tk.Frame(frame, bg=pal.CARD)
         row.pack(anchor="w")
         for card in sorted(self.ctl.hand, key=lambda c: c.value):

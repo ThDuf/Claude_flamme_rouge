@@ -48,16 +48,23 @@ auteur Asger Harding Granerud). Ce texte résume la règle avec nos mots ; il ne
 - Cases de 1 à 3 files ; pavés (1 file, pas d'aspiration) ; ravitaillement (3 files, minimum 4 cases) ;
   aspiration qui respecte la place disponible en sortie de zone large.
 - Équipes Peloton et Muscle, à choisir sur l'écran « Qui joue ? » (en plus de Joueur et IA).
+- Les 9 tuiles, numérotées comme sur les cartes étape : 1 nouveau départ (5–6 équipes), 2 Échappée,
+  3 et 4 zones à 3 files (ravitaillement), 5 à 8 pavés, 9 tuile bonus (5–6 équipes).
+- Les 12 cartes étape (étapes 7 à 12, côtés 2–4 et 5–6 équipes), dans la rubrique « Extension Peloton » du menu.
+- Variante Échappée : interrupteur sur l'écran « Qui joue ? » (seulement si le parcours a la tuile 2).
+  Chaque équipe choisit un coureur ou passe ; l'IA enchérit avec son Rouleur ; les fantômes ne participent pas.
 
 ## Choix faits faute d'information
 
-- **Départ à 5–6 équipes** : la grille de la tuile de départ (2 files) ne suffit pas pour 12 coureurs ;
-  quand il le faut, ses cases reçoivent une 3e file.
-- **Paquets des fantômes** : quand le paquet est vide, on remélange les cartes déjà retournées
-  (la règle ne dit rien ; sans cela, l'équipe n'aurait plus de cartes avant l'arrivée).
-- **Tuiles Peloton** : leurs cases exactes ne sont pas encore décrites. En attendant, l'éditeur propose
-  deux tuiles génériques marquées « provisoire » : une ligne droite de pavés et une ligne droite de ravitaillement.
-- **Variante Échappée** : pas encore programmée, il faut la description de la tuile Échappée (tuile 2).
+- **Cases des tuiles Peloton** : relevées sur une photo trop petite, donc PROVISOIRES
+  (`PELOTON_TILE_DEFS` dans `flamme_rouge/official.py`) :
+  1 `ssssff`, 2 `fffxff` (zone d'échappée sur la 4e case), 3 et 4 `rrrrrr`, 5 `ffpppp`, 6 `pppppp`,
+  7 `ppppff`, 8 `pppppf`, 9 `ffffff`. Les deux faces d'une tuile ne sont pas encore distinguées
+  (sur les cartes, un chiffre encadré désigne l'autre face).
+- **Départ à 5–6 équipes** : quand la grille ne suffit pas, ses cases reçoivent une 3e file.
+- **Tuile bonus** : supposée être une ligne droite de 6 cases.
+- **Paquets des fantômes** : quand le paquet est vide, on remélange les cartes déjà retournées.
+- **Mise de l'IA** : sa plus grosse carte si elle vaut au moins 6, sinon sa plus petite.
 
 ## Sources
 

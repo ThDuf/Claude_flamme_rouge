@@ -86,16 +86,45 @@ OFFICIAL_TILES: dict[str, Tile] = {
 }
 
 
-# Extension Peloton : en attendant la description des 9 tuiles de la boîte, deux tuiles génériques
-# (marquées « provisoire » dans l'éditeur) pour poser des pavés et une zone de ravitaillement.
-PELOTON_PROVISIONAL: dict[str, Tile] = {
-    "P1": Tile(KIND_STRAIGHT, None, "pppppp", "P1"),  # ligne droite pavée, une seule file
-    "P2": Tile(KIND_STRAIGHT, None, "rrrrrr", "P2"),  # ligne droite de ravitaillement, trois files
+# Extension Peloton : les 9 tuiles, numérotées comme sur les cartes étape (toutes des lignes droites).
+# Numérotation et rôle relevés sur les cartes ; le détail case par case est PROVISOIRE (lu sur une photo
+# trop petite) et la différence entre les deux faces d'une tuile n'est pas encore connue.
+#   p pavé (1 file), r ravitaillement (3 files), x zone d'échappée (tuile 2).
+PELOTON_TILE_DEFS: dict[str, tuple[Optional[tuple[float, int]], str]] = {
+    "1": (None, "ssssff"),  # nouveau départ pour 5–6 équipes (la grille passe à 3 files en partie)
+    "2": (None, "fffxff"),  # tuile Échappée : zone d'échappée sur la 4e case
+    "3": (None, "rrrrrr"),  # zones à 3 files (ravitaillement)
+    "4": (None, "rrrrrr"),
+    "5": (None, "ffpppp"),  # pavés
+    "6": (None, "pppppp"),
+    "7": (None, "ppppff"),
+    "8": (None, "pppppf"),
+    "9": (None, "ffffff"),  # tuile bonus, ajoutée à 5–6 équipes
 }
+PELOTON_TILES: dict[str, Tile] = {n: tile_from_def(n, turn, cells) for n, (turn, cells) in PELOTON_TILE_DEFS.items()}
+
+# Les 12 cartes étape de l'extension (étapes 7 à 12, un côté 2–4 équipes, un côté 5–6), relevées sur
+# les cartes : lettres = tuiles du jeu de base (majuscule = face montagne), chiffres = tuiles Peloton.
+PELOTON_STAGES = {
+    "Étape 7 · 2–4 équipes": "a23gMRPkeqos4cDHjTniu",
+    "Étape 7 · 5–6 équipes": "123gMRPkeqos4cDHjT9niu",
+    "Étape 8 · 2–4 équipes": "a2h4oIcQDF3prsejLktgu",
+    "Étape 8 · 5–6 équipes": "12h4oIcQDF3prsejLktg9u",
+    "Étape 9 · 2–4 équipes": "A23p57okjq4e86hgirsTu",
+    "Étape 9 · 5–6 équipes": "1293p57okjq4e86hgirsTu",
+    "Étape 10 · 2–4 équipes": "a2h4Lopc56r3gqJksteIU",
+    "Étape 10 · 5–6 équipes": "12h49Lopc56r3gqJksteIU",
+    "Étape 11 · 2–4 équipes": "a285qgir34sopthk76eJu",
+    "Étape 11 · 5–6 équipes": "1285qgir934sopthk76eJu",
+    "Étape 12 · 2–4 équipes": "A24qMOKRFsd3pinhgeTju",
+    "Étape 12 · 5–6 équipes": "124qMOKRFsd3pin9hgeTju",
+}
+
+ALL_TILES: dict[str, Tile] = {**OFFICIAL_TILES, **PELOTON_TILES}
 
 
 def official_tile(letter: str) -> Tile:
-    return OFFICIAL_TILES[letter] if letter in OFFICIAL_TILES else PELOTON_PROVISIONAL[letter]
+    return ALL_TILES[letter]
 
 
 @dataclass(frozen=True)
@@ -118,3 +147,8 @@ def build_stage(name: str, setup: str, catalog: dict[str, Tile] = OFFICIAL_TILES
 
 def official_stages() -> list[OfficialStage]:
     return [build_stage(name, setup) for name, setup in STAGES.items()]
+
+
+def peloton_stages() -> list[OfficialStage]:
+    """Les étapes de l'extension Peloton (tuiles du jeu de base et tuiles Peloton)."""
+    return [build_stage(name, setup, ALL_TILES) for name, setup in PELOTON_STAGES.items()]

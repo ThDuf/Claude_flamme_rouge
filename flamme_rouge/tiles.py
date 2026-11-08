@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .geometry import ROAD_WIDTH, layout_squares
-from .track import ASCENT, COBBLES, DESCENT, LEFT, NORMAL, RIGHT, SUPPLY, Track
+from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, LEFT, NORMAL, RIGHT, SUPPLY, Track
 
 KIND_START = "start"
 KIND_FINISH = "finish"
@@ -31,12 +31,13 @@ KINDS = (KIND_START, KIND_FINISH, KIND_STRAIGHT, KIND_SOFT, KIND_SHARP)
 # Lettres des cases d'une tuile
 FLAT, UP, DOWN, START_CELL, FINISH_CELL = "f", "u", "d", "s", "e"
 COBBLE_CELL, SUPPLY_CELL = "p", "r"  # extension Peloton : pavés (1 file), ravitaillement (3 files) ; plats
-CELL_CHARS = FLAT + UP + DOWN + START_CELL + FINISH_CELL + COBBLE_CELL + SUPPLY_CELL
-RACE_CELLS = FLAT + UP + DOWN + COBBLE_CELL + SUPPLY_CELL
+BREAKAWAY_CELL = "x"  # extension Peloton : case de la zone d'échappée (tuile 2), plate
+CELL_CHARS = FLAT + UP + DOWN + START_CELL + FINISH_CELL + COBBLE_CELL + SUPPLY_CELL + BREAKAWAY_CELL
+RACE_CELLS = FLAT + UP + DOWN + COBBLE_CELL + SUPPLY_CELL + BREAKAWAY_CELL
 CELL_TO_TERRAIN = {FLAT: NORMAL, UP: ASCENT, DOWN: DESCENT, START_CELL: NORMAL, FINISH_CELL: NORMAL,
-                   COBBLE_CELL: NORMAL, SUPPLY_CELL: NORMAL}
+                   COBBLE_CELL: NORMAL, SUPPLY_CELL: NORMAL, BREAKAWAY_CELL: NORMAL}
 CELL_LANES = {COBBLE_CELL: 1, SUPPLY_CELL: 3}  # les autres cases ont 2 files
-CELL_SURFACE = {COBBLE_CELL: COBBLES, SUPPLY_CELL: SUPPLY}
+CELL_SURFACE = {COBBLE_CELL: COBBLES, SUPPLY_CELL: SUPPLY, BREAKAWAY_CELL: BREAKAWAY}
 
 STRAIGHT_LENGTH = 6
 CURVE_LENGTH = 2
@@ -78,7 +79,7 @@ RELIEF_NAMES = list(relief_profiles(STRAIGHT_LENGTH))
 
 def relief_name(cells: str) -> str:
     """Nom du relief des cases de course (les cases de grille et d'après l'arrivée sont ignorées)."""
-    race = "".join(FLAT if c in (COBBLE_CELL, SUPPLY_CELL) else c for c in cells if c in RACE_CELLS)
+    race = "".join(FLAT if c in (COBBLE_CELL, SUPPLY_CELL, BREAKAWAY_CELL) else c for c in cells if c in RACE_CELLS)
     if not race:
         return "plat"
     for name, profile in relief_profiles(len(race)).items():

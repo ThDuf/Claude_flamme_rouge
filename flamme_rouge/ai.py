@@ -71,6 +71,22 @@ def choose_card(game: "Game", rider: "Rider", hand: list[Card]) -> Card:
     return max(hand, key=lambda c: (round(score(game, rider, c), 6), -c.value, c.exhaustion))
 
 
+BID_HIGH = 6  # variante Échappée : l'IA ne mise une grosse carte que si elle en a une d'au moins 6
+
+
+def breakaway_rider(game: "Game", team: int) -> "Rider":
+    """Variante Échappée : l'IA tente l'échappée avec son Rouleur (paquet régulier, utile devant)."""
+    riders = [r for r in game.riders if r.team == team]
+    return next((r for r in riders if r.kind == "rouleur"), riders[0])
+
+
+def bid_card(hand: list[Card]) -> Card:
+    """Mise de l'IA : sa plus grosse carte si elle vaut au moins 6 (elle joue pour gagner), sinon sa plus petite
+    (elle garde ses cartes pour la course)."""
+    best = max(hand, key=lambda c: c.value)
+    return best if best.value >= BID_HIGH else min(hand, key=lambda c: c.value)
+
+
 def ai_chooser(game: "Game", rider: "Rider", hand: list[Card]) -> Card:
     """Même signature que les autres « choosers » du moteur (voir game.Chooser)."""
     return choose_card(game, rider, hand)

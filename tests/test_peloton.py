@@ -159,3 +159,116 @@ def test_revealed_cards_are_kept_with_who_plays_them():
     ctl.advance()
     ctl.advance()  # tour suivant : les cartes du tour 1 restent visibles jusqu'au prochain mouvement
     assert ctl.phase == CHOOSE and ctl.last_revealed_turn == 1
+
+
+def test_peloton_tiles_and_the_12_stage_cards():
+    from flamme_rouge.official import PELOTON_STAGES, PELOTON_TILES, peloton_stages
+    from flamme_rouge.tiles import ERROR, validate
+
+    assert list(PELOTON_TILES) == list("123456789")
+    assert PELOTON_TILES["1"].kind == "start" and PELOTON_TILES["2"].cells.count("x") == 1
+    assert len(PELOTON_STAGES) == 12
+    for stage in peloton_stages():
+        assert stage.available, stage.name
+        assert not [i for i in validate(stage.tiles) if i.level == ERROR], stage.name  # aucun croisement
+        big = "5–6" in stage.name
+        assert len(stage.setup) == (22 if big else 21)
+        assert stage.setup[0] == ("1" if big else stage.setup[0]) and ("9" in stage.setup) == big
+        # chaque tuile Peloton remplace une ligne droite du jeu de base : tous les virages restent
+        used = {c.lower() for c in stage.setup if c.isalpha()}
+        assert set("eghijkopqrst") <= used
+
+
+def test_a_peloton_stage_race_finishes():
+    from flamme_rouge.official import peloton_stages
+
+    stage = next(s for s in peloton_stages() if s.name == "Étape 9 · 5–6 équipes")
+    track = plan_to_track(stage.tiles)
+    assert track.lanes(track.start) == 2 and any(track.surface(s) == COBBLES for s in range(len(track)))
+    g = Game(track, num_teams=6, seed=3, extensions=[PELOTON])
+    while not g.finished:
+        g.play_turn()
+
+
+# ------------------------------------------------------------------ variante Échappée
+
+
+def peloton_stage(name):
+    from flamme_rouge.official import peloton_stages
+
+    return plan_to_track(next(s for s in peloton_stages() if s.name == name).tiles)
+
+
+def test_breakaway_zone_is_on_the_fourth_square_of_tile_2():
+    track = peloton_stage("Étape 7 · 2–4 équipes")
+    g = Game(track, num_teams=2, seed=0, extensions=[PELOTON])
+    assert g.breakaway_squares() == [6 + 3]  # départ (6 cases) puis 4e case de la tuile 2
+    assert g.breakaway_winners_count() == 1
+    assert Game(stage(), num_teams=2, seed=0).breakaway_squares() == []  # pas de tuile 2 dans le jeu de base
+
+
+def test_resolve_breakaway_winner_cards_fatigue_and_ties():
+    g = Game(peloton_stage("Étape 7 · 2–4 équipes"), num_teams=2, seed=0, extensions=[PELOTON])
+    r1, r2 = g.riders[0], g.riders[2]
+    before1 = len(r1.draw_pile) + len(r1.recycle)
+    bids = {r1: [Card(5), Card(4)], r2: [Card(6), Card(3)]}  # 9 partout : le plus en arrière gagne
+    r1.position, r2.position = 3, 2
+    winners = g.resolve_breakaway(bids)
+    assert winners == [r2] and r2.position == 9 and r2.lane == 0
+    assert sum(c.exhaustion for c in r2.draw_pile) == 2 and r2.used[-2:] == [Card(6), Card(3)]  # mises retirées du jeu
+    assert len(r1.draw_pile) == before1 + 2 and not r1.recycle  # le perdant récupère ses mises, paquet remélangé
+
+
+def test_two_breakaway_riders_with_five_or_six_teams():
+    g = Game(peloton_stage("Étape 7 · 5–6 équipes"), num_teams=5, seed=0, extensions=[PELOTON])
+    assert g.breakaway_winners_count() == 2
+    bids = {g.riders[0]: [Card(9), Card(9)], g.riders[2]: [Card(7), Card(7)], g.riders[4]: [Card(2), Card(2)]}
+    winners = g.resolve_breakaway(bids)
+    assert winners == [g.riders[0], g.riders[2]]
+    assert {(r.position, r.lane) for r in winners} == {(g.breakaway_squares()[0], 0), (g.breakaway_squares()[0], 1)}
+
+
+def test_controller_breakaway_phase_with_a_player_an_ai_and_a_pass():
+    from flamme_rouge.controller import BREAKAWAY
+
+    g = Game(peloton_stage("Étape 7 · 2–4 équipes"), num_teams=3, seed=1, extensions=[PELOTON],
+             team_types=[TEAM_PLAYER, TEAM_PLAYER, TEAM_MUSCLE])
+    ctl = TurnController(g, ai_teams={1}, breakaway=True)
+    assert ctl.phase == BREAKAWAY and ctl.bid_team == 0 and ctl.current_rider is None
+    sprinteur = next(r for r in g.riders if r.team == 0 and r.kind == "sprinteur")
+    ctl.choose_bid_rider(sprinteur)
+    assert ctl.current_rider is sprinteur and len(ctl.hand) == 4 and ctl.bid_round == 1
+    ctl.choose(max(ctl.hand, key=lambda c: c.value))
+    assert ctl.bid_round == 2
+    ctl.choose(max(ctl.hand, key=lambda c: c.value))
+    # l'IA (équipe 2) a enchéri toute seule, l'équipe Muscle ne participe pas : la course commence
+    assert ctl.phase == CHOOSE and len(ctl.breakaway_winners) == 1
+    assert ctl.breakaway_winners[0].position == 9
+    texts = [line.text for line in ctl.log]
+    assert any("(IA) tente l'échappée" in t for t in texts) and any("part en échappée" in t for t in texts)
+
+    g2 = Game(peloton_stage("Étape 7 · 2–4 équipes"), num_teams=2, seed=1, extensions=[PELOTON])
+    ctl2 = TurnController(g2, breakaway=True)
+    ctl2.choose_bid_rider(None)
+    ctl2.choose_bid_rider(None)
+    assert ctl2.phase == CHOOSE and not ctl2.breakaway_winners
+    assert any("Personne n'a tenté" in line.text for line in ctl2.log)
+
+
+def test_no_breakaway_phase_without_the_option_or_the_tile():
+    g = Game(peloton_stage("Étape 7 · 2–4 équipes"), num_teams=2, seed=1, extensions=[PELOTON])
+    assert TurnController(g).phase == CHOOSE
+    assert TurnController(Game(stage(), num_teams=2, seed=1), breakaway=True).phase == CHOOSE
+
+
+def test_every_peloton_stage_can_be_drawn():
+    from flamme_rouge.boardview import map_primitives, plan_preview_primitives, profile_primitives
+    from flamme_rouge.official import peloton_stages
+
+    for stage in peloton_stages():
+        track = plan_to_track(stage.tiles)
+        teams = 6 if "5–6" in stage.name else 4
+        g = Game(track, num_teams=teams, seed=0, extensions=[PELOTON])
+        texts = {p[3] for p in map_primitives(g) if p[0] == "text"}
+        assert "ÉCHAPPÉE" in texts, stage.name
+        assert plan_preview_primitives(stage.tiles, 600, 470) and profile_primitives(track, 1000, 100, riders=g.riders)

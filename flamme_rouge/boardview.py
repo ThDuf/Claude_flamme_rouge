@@ -19,7 +19,7 @@ from .game import Game
 from .geometry import EXTRA_SQUARES, finish_edge, layout_squares, point_on_road
 from .rider import Rider
 from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
-from .track import ASCENT, COBBLES, DESCENT, NORMAL, SUPPLY, Track
+from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, NORMAL, SUPPLY, Track
 from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
 
 from . import palette as pal
@@ -246,7 +246,9 @@ def _slope_chevrons(prims: list, squares, square: int, kind: str, tr, width: int
 
 COBBLE_COLOR, COBBLE_STONE, COBBLE_EDGE = "#8b6f47", "#a8916a", "#5c4630"
 SUPPLY_COLOR = "#14b8a6"
-SURFACE_LABEL = {COBBLES: "PAVÉS", SUPPLY: "RAVITO"}
+BREAKAWAY_COLOR = "#d4b84a"  # cases jaunes de la zone d'échappée (tuile 2)
+SURFACE_LABEL = {COBBLES: "PAVÉS", SUPPLY: "RAVITO", BREAKAWAY: "ÉCHAPPÉE"}
+SURFACE_COLOR = {COBBLES: COBBLE_COLOR, SUPPLY: SUPPLY_COLOR, BREAKAWAY: BREAKAWAY_COLOR}
 
 
 def _surface_fill(fill: str, surface: str) -> str:
@@ -255,6 +257,8 @@ def _surface_fill(fill: str, surface: str) -> str:
         return _mix(fill, COBBLE_COLOR, 0.6)
     if surface == SUPPLY:
         return _mix(fill, SUPPLY_COLOR, 0.22)
+    if surface == BREAKAWAY:
+        return _mix(fill, BREAKAWAY_COLOR, 0.45)
     return fill
 
 
@@ -288,7 +292,7 @@ def _surface_labels(prims: list, squares, track: Track, indices, tr, scale: floa
         mid = (s + end - 1) // 2
         if mid in shown:
             x, y = tr(point_on_road(squares, mid, squares[mid].lanes + 0.9))
-            color = COBBLE_STONE if surface == COBBLES else SUPPLY_COLOR
+            color = COBBLE_STONE if surface == COBBLES else SURFACE_COLOR[surface]
             prims.append(("text", x, y, SURFACE_LABEL[surface], color, 8 if scale < 15 else 9, True, "center"))
         s = end
 
@@ -897,7 +901,7 @@ def profile_primitives(
     for s in range(n):  # extension Peloton : pavés (brun) et ravitaillement (turquoise) sous l'axe
         surface = track.surface(s)
         if surface:
-            color = COBBLE_COLOR if surface == COBBLES else SUPPLY_COLOR
+            color = SURFACE_COLOR[surface]
             prims.append(("rect", x_of(s), base + 6, x_of(s + 1), base + 9, color, color, 1))
     if any(track.surface(s) == COBBLES for s in range(n)):
         title += "  ·  pavés"

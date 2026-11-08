@@ -30,7 +30,7 @@ from flamme_rouge.tiles import (
     summary,
     validate,
 )
-from flamme_rouge.official import OFFICIAL_TILES, PELOTON_PROVISIONAL, official_tile
+from flamme_rouge.official import OFFICIAL_TILES, PELOTON_TILES, official_tile
 
 PREVIEW_W, PREVIEW_H = 600, 470
 WINDOW_W, WINDOW_H = 1280, 800
@@ -44,14 +44,14 @@ _KIND_ORDER = {KIND_START: 0, KIND_FINISH: 1, KIND_STRAIGHT: 2, KIND_SOFT: 3, KI
 def side_letters(side: str) -> list[str]:
     """Les 21 lettres d'une face de la boîte, rangées par type : départ, arrivée, droites, virages doux, serrés."""
     if side == PELOTON_SIDE:
-        return list(PELOTON_PROVISIONAL)
+        return list(PELOTON_TILES)
     letters = "abcdefghijklmnopqrstu" if side == FLAT_SIDE else "ABCDEFGHIJKLMNOPQRSTU"
     return sorted(letters, key=lambda c: (_KIND_ORDER[OFFICIAL_TILES[c].kind], OFFICIAL_TILES[c].direction or "", c))
 
 
 def letter_for_tile(tile) -> str | None:
     """Lettre officielle d'une tuile du parcours (une tuile « libre » identique à une face officielle compte)."""
-    if tile.letter in OFFICIAL_TILES:
+    if tile.letter in OFFICIAL_TILES or tile.letter in PELOTON_TILES:
         return tile.letter
     return next((letter for letter, official in OFFICIAL_TILES.items() if official == tile), None)
 
@@ -104,7 +104,7 @@ class TilePalette(tk.Frame):
     def select(self, letter: str) -> None:
         """Choisit une tuile (et affiche la face où elle se trouve)."""
         self.selected = letter
-        self.side_var.set(PELOTON_SIDE if letter in PELOTON_PROVISIONAL else FLAT_SIDE if letter.islower() else MOUNTAIN_SIDE)
+        self.side_var.set(PELOTON_SIDE if letter in PELOTON_TILES else FLAT_SIDE if letter.islower() else MOUNTAIN_SIDE)
         self.redraw()
 
     def set_used(self, letters) -> None:
@@ -117,12 +117,12 @@ class TilePalette(tk.Frame):
             canvas.delete("all")
             if i >= len(letters):  # face Peloton : deux tuiles seulement, les autres cases restent vides
                 if i == len(letters):
-                    canvas.create_text(4, CARD_H / 2, text="tuiles provisoires,\nen attendant celles\nde la boîte",
+                    canvas.create_text(4, CARD_H / 2, text="tuiles Peloton 1 à 9\n(cases provisoires,\nfaces non distinguées)",
                                        anchor="w", fill=pal.FAINT, font=ui.font(8))
                 continue
             letter = letters[i]
             prims = tile_card_primitives(official_tile(letter), CARD_W, CARD_H, selected=letter == self.selected,
-                                         used=letter.lower() in self.used and letter not in PELOTON_PROVISIONAL)
+                                         used=letter.lower() in self.used)
             ui.paint(canvas, prims)
 
 

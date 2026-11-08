@@ -7,7 +7,8 @@ from flamme_rouge import palette as pal
 from flamme_rouge.boardview import profile_primitives, track_preview_primitives
 from flamme_rouge.extensions import EXTENSIONS, PELOTON, READY
 from flamme_rouge.game import TEAM_MUSCLE, TEAM_PELOTON, TEAM_PLAYER
-from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, Choice, build_choices
+from flamme_rouge.track import BREAKAWAY
+from flamme_rouge.catalog import GROUP_BASE, GROUP_MINE, GROUP_OFFICIAL, GROUP_PELOTON, Choice, build_choices
 from flamme_rouge.paths import PARCOURS_DIR, ensure_parcours_dir
 from flamme_rouge.tiles import KIND_FINISH, KIND_START, make_tile
 
@@ -23,6 +24,7 @@ TEAM_CHOICES = [(n, str(n)) for n in range(2, 7)]  # 5 et 6 : extension Peloton
 GROUP_HINTS = {
     GROUP_BASE: "21 tuiles comme dans la boîte (même composition que les cartes étape, sans en être la copie).",
     GROUP_OFFICIAL: "Les cartes étape du jeu, avec les tuiles de la boîte.",
+    GROUP_PELOTON: "Les étapes 7 à 12 de l'extension (pavés, ravitaillement, échappée) : coche l'extension Peloton.",
     GROUP_MINE: "Parcours créés avec l'éditeur (dossier « parcours »).",
 }
 
@@ -65,7 +67,7 @@ class ChoiceRow(tk.Frame):
 
 class MenuScreen:
     def __init__(self, parent, on_start):
-        """`on_start(track, teams, secret, animate, extensions, ai_teams, team_types)` est appelé quand on lance la course."""
+        """`on_start(track, teams, secret, animate, extensions, ai_teams, team_types, breakaway)` lance la course."""
         self.parent = parent
         self.root = parent.winfo_toplevel()
         ui.init(self.root)
@@ -85,6 +87,7 @@ class MenuScreen:
         self.player_vars = [tk.StringVar(value=HUMAN if team == 0 else AI) for team in range(len(TEAM_COLORS))]
         self.players_frame = None
         self.editor_win = None
+        self.breakaway_var = tk.BooleanVar(value=True)  # variante Échappée (extension Peloton, tuile 2 sur le parcours)
         self.frame = tk.Frame(parent, bg=pal.BG)
         self.frame.pack(fill="both", expand=True)
         self._build()
@@ -242,6 +245,9 @@ class MenuScreen:
         if not choice.playable:
             messagebox.showinfo("Parcours indisponible", choice.details)
             return
+        if choice.group == GROUP_PELOTON and PELOTON not in self.extensions():
+            messagebox.showinfo("Extension Peloton", "Cette étape se joue avec l'extension Peloton : coche-la dans « Extensions ».")
+            return
         if int(self.teams_var.get()) > 4 and PELOTON not in self.extensions():
             messagebox.showinfo("5 ou 6 équipes", "On joue à 5 ou 6 équipes avec l'extension Peloton : coche-la dans « Extensions ».")
             return
@@ -297,6 +303,12 @@ class MenuScreen:
                          command=self._refresh_players).pack(side="right")
         self.players_hint = tk.Label(body, text="", font=ui.font(10), bg=pal.BG, fg=pal.MUTED, anchor="w", justify="left")
         self.players_hint.pack(fill="x", pady=(12, 0))
+        if self.breakaway_available():
+            row = tk.Frame(body, bg=pal.BG)
+            row.pack(fill="x", pady=(14, 0))
+            ui.Toggle(row, "Variante Échappée", self.breakaway_var).pack(side="left")
+            tk.Label(row, text="avant le départ, chaque équipe peut miser deux cartes d'un coureur pour partir devant",
+                     font=ui.font(10), bg=pal.BG, fg=pal.MUTED).pack(side="left", padx=10)
 
         tk.Frame(frame, bg=pal.BORDER, height=1).pack(fill="x", side="bottom")
         bottom = tk.Frame(frame, bg=pal.PANEL)
@@ -329,13 +341,20 @@ class MenuScreen:
             self.players_frame = None
         self.frame.pack(fill="both", expand=True)
 
+    def breakaway_available(self) -> bool:
+        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours."""
+        track = self.current().track
+        return PELOTON in self.extensions() and track is not None and any(
+            track.surface(s) == BREAKAWAY for s in range(len(track)))
+
     def on_players_start(self) -> None:
         if self.team_types().count(TEAM_PELOTON) > 1:
             messagebox.showinfo("Équipe Peloton", "Il ne peut y avoir qu'une équipe Peloton.")
             return
         choice = self.current()
+        breakaway = self.breakaway_available() and self.breakaway_var.get() is True
         self.on_start(choice.track, int(self.teams_var.get()), self.secret_var.get() is True, self.animate_var.get() is True,
-                      self.extensions(), self.ai_teams(), self.team_types())
+                      self.extensions(), self.ai_teams(), self.team_types(), breakaway)
 
     def extensions(self) -> frozenset[str]:
         """Les extensions cochées."""
