@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .geometry import ROAD_WIDTH, layout_squares
-from .track import ASCENT, DESCENT, LEFT, NORMAL, RIGHT, Track
+from .track import ASCENT, COBBLES, DESCENT, LEFT, NORMAL, RIGHT, SUPPLY, Track
 
 KIND_START = "start"
 KIND_FINISH = "finish"
@@ -30,9 +30,13 @@ KINDS = (KIND_START, KIND_FINISH, KIND_STRAIGHT, KIND_SOFT, KIND_SHARP)
 
 # Lettres des cases d'une tuile
 FLAT, UP, DOWN, START_CELL, FINISH_CELL = "f", "u", "d", "s", "e"
-CELL_CHARS = FLAT + UP + DOWN + START_CELL + FINISH_CELL
-RACE_CELLS = FLAT + UP + DOWN
-CELL_TO_TERRAIN = {FLAT: NORMAL, UP: ASCENT, DOWN: DESCENT, START_CELL: NORMAL, FINISH_CELL: NORMAL}
+COBBLE_CELL, SUPPLY_CELL = "p", "r"  # extension Peloton : pavés (1 file), ravitaillement (3 files) ; plats
+CELL_CHARS = FLAT + UP + DOWN + START_CELL + FINISH_CELL + COBBLE_CELL + SUPPLY_CELL
+RACE_CELLS = FLAT + UP + DOWN + COBBLE_CELL + SUPPLY_CELL
+CELL_TO_TERRAIN = {FLAT: NORMAL, UP: ASCENT, DOWN: DESCENT, START_CELL: NORMAL, FINISH_CELL: NORMAL,
+                   COBBLE_CELL: NORMAL, SUPPLY_CELL: NORMAL}
+CELL_LANES = {COBBLE_CELL: 1, SUPPLY_CELL: 3}  # les autres cases ont 2 files
+CELL_SURFACE = {COBBLE_CELL: COBBLES, SUPPLY_CELL: SUPPLY}
 
 STRAIGHT_LENGTH = 6
 CURVE_LENGTH = 2
@@ -74,7 +78,7 @@ RELIEF_NAMES = list(relief_profiles(STRAIGHT_LENGTH))
 
 def relief_name(cells: str) -> str:
     """Nom du relief des cases de course (les cases de grille et d'après l'arrivée sont ignorées)."""
-    race = "".join(c for c in cells if c in RACE_CELLS)
+    race = "".join(FLAT if c in (COBBLE_CELL, SUPPLY_CELL) else c for c in cells if c in RACE_CELLS)
     if not race:
         return "plat"
     for name, profile in relief_profiles(len(race)).items():
@@ -128,6 +132,14 @@ class Tile:
         return "".join(CELL_TO_TERRAIN[c] for c in self.cells)
 
     @property
+    def lanes(self) -> tuple[int, ...]:
+        return tuple(CELL_LANES.get(c, 2) for c in self.cells)
+
+    @property
+    def surfaces(self) -> tuple[str, ...]:
+        return tuple(CELL_SURFACE.get(c, "") for c in self.cells)
+
+    @property
     def grid_squares(self) -> int:
         return self.cells.count(START_CELL)
 
@@ -142,6 +154,10 @@ class Tile:
             text += " à gauche" if self.direction == LEFT else " à droite"
         elif self.kind == KIND_START:
             text += f" ({self.grid_squares} places)"
+        if COBBLE_CELL in self.cells:
+            text += " pavée (1 file)"
+        elif SUPPLY_CELL in self.cells:
+            text += " de ravitaillement (3 files)"
         text = f"{text} — {self.relief_name}"
         return f"{self.letter} · {text}" if self.letter else text
 
@@ -192,7 +208,9 @@ def full_track(tiles: Sequence[Tile]) -> Track:
         raise ValueError("Le parcours est vide.")
     layout = "".join(t.layout for t in tiles)
     angles = [a for t in tiles for a in t.angles]
-    return Track(layout, angles, min(start_squares(tiles), len(layout) - 1))
+    lanes = [n for t in tiles for n in t.lanes]
+    surfaces = [x for t in tiles for x in t.surfaces]
+    return Track(layout, angles, min(start_squares(tiles), len(layout) - 1), None, lanes, surfaces)
 
 
 def plan_to_track(tiles: Sequence[Tile]) -> Track:
@@ -206,7 +224,7 @@ def plan_to_track(tiles: Sequence[Tile]) -> Track:
     if race <= start:
         raise ValueError("Il n'y a aucune case de course avant l'arrivée.")
     straights = [(r.start, r.stop) for t, r in zip(tiles, tile_ranges(tiles)) if t.kind == KIND_STRAIGHT and r.stop <= race]
-    return Track(full.layout[:race], full.angles[:race], start, straights)
+    return Track(full.layout[:race], full.angles[:race], start, straights, full.lane_counts[:race], full.surfaces[:race])
 
 
 # ----------------------------------------------------------------- validation

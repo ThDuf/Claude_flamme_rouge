@@ -59,13 +59,14 @@ MOUNTAIN_DEFS: dict[str, tuple[Optional[tuple[float, int]], str]] = {
     "S": ((DEG45, GAUCHE), "ff"),
 }
 
-# Les 5 cartes étape retranscrites depuis le règlement officiel (la 6e n'apparaît pas dans les sources).
+# Les 6 cartes étape du jeu de base (lettre encadrée sur la carte = face montagne = majuscule).
 STAGES = {
     "Avenue Corso Paseo": "abcdefghijklmnopqrstu",  # parcours conseillé pour une première partie
     "Ronde van Wevelgem": "abcmgfteqonLPjkIDHrSu",
     "La Haut Montagne": "abcfimetKGLHJsdopRQNU",
     "La Classicissima": "AebQRNHPcgikDFsLojmtu",
     "Firenze - Milano": "abcgiDHqntmKOLrepJsfu",
+    "Ballons Centrale": "AnLHgceqtrMBoipjDFkSu",  # relevée sur la photo des cartes étape
 }
 
 
@@ -85,8 +86,16 @@ OFFICIAL_TILES: dict[str, Tile] = {
 }
 
 
+# Extension Peloton : en attendant la description des 9 tuiles de la boîte, deux tuiles génériques
+# (marquées « provisoire » dans l'éditeur) pour poser des pavés et une zone de ravitaillement.
+PELOTON_PROVISIONAL: dict[str, Tile] = {
+    "P1": Tile(KIND_STRAIGHT, None, "pppppp", "P1"),  # ligne droite pavée, une seule file
+    "P2": Tile(KIND_STRAIGHT, None, "rrrrrr", "P2"),  # ligne droite de ravitaillement, trois files
+}
+
+
 def official_tile(letter: str) -> Tile:
-    return OFFICIAL_TILES[letter]
+    return OFFICIAL_TILES[letter] if letter in OFFICIAL_TILES else PELOTON_PROVISIONAL[letter]
 
 
 @dataclass(frozen=True)

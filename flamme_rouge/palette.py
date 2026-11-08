@@ -15,10 +15,10 @@ ACCENT_HI = "#ff7074"
 ACCENT_DK = "#d93638"
 GOOD = "#34d399"
 
-# Équipes : 1 rouge, 2 bleu, 3 vert, 4 jaune
-TEAM_FILL = ["#ff4d4f", "#3b82f6", "#22c55e", "#facc15"]
-TEAM_TEXT = ["#ff7b7d", "#6aa7ff", "#4ade80", "#fde047"]  # versions pour du texte sur fond sombre
-LABEL_ON_FILL = ["white", "white", "black", "black"]
+# Équipes : 1 rouge, 2 bleu, 3 vert, 4 jaune ; 5 rose et 6 blanc (extension Peloton)
+TEAM_FILL = ["#ff4d4f", "#3b82f6", "#22c55e", "#facc15", "#f472b6", "#f1f5f9"]
+TEAM_TEXT = ["#ff7b7d", "#6aa7ff", "#4ade80", "#fde047", "#f9a8d4", "#f8fafc"]  # pour du texte sur fond sombre
+LABEL_ON_FILL = ["white", "white", "black", "black", "black", "black"]
 
 # Plateau
 GRASS = "#1f5a3b"

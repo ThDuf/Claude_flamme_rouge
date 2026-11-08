@@ -12,11 +12,11 @@ METEO = "meteo"
 
 # nom interne -> (nom affiché, description courte)
 EXTENSIONS = {
-    PELOTON: ("Peloton", "jusqu'à 6 équipes, pavés, ravitaillement, échappée"),
+    PELOTON: ("Peloton", "5–6 équipes, pavés, ravitaillement, équipes fantômes"),
     METEO: ("Meteo", "vent et pluie sur les lignes droites"),
 }
 
-READY: frozenset[str] = frozenset({METEO})  # extensions dont les règles sont programmées
+READY: frozenset[str] = frozenset({METEO, PELOTON})  # extensions dont les règles sont programmées
 
 
 def check_extensions(names: Iterable[str]) -> frozenset[str]:

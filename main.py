@@ -29,10 +29,10 @@ class Launcher:
         self._reset()
         MenuScreen(self.container, self.start_game)
 
-    def start_game(self, track, teams: int, secret: bool, animate: bool, extensions=()) -> None:
+    def start_game(self, track, teams: int, secret: bool, animate: bool, extensions=(), ai_teams=(), team_types=None) -> None:
         self._reset()
         self.app = App(self.container, teams=teams, secret=secret, track=track, on_menu=self.show_menu, animate=animate,
-                       extensions=extensions)
+                       extensions=extensions, ai_teams=ai_teams, team_types=team_types)
 
 
 def main() -> None:

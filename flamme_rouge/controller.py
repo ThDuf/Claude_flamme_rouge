@@ -8,10 +8,12 @@ Les événements à afficher s'accumulent dans `log` (voir drain_log).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
 
-from .cards import Card
+from .ai import choose_card
+from .cards import ATTACK, Card
 from .game import Game
+from .track import DESCENT
 from .rider import Rider
 
 CHOOSE = "choose"  # chaque coureur choisit sa carte
@@ -29,12 +31,19 @@ class LogLine:
 
 
 def describe(card: Card) -> str:
+    if card.special:
+        return {"attaque": "Attaque (2 / 9)", "muscle": "5 (Muscle)"}[card.special]
     return f"{card.value} (fatigue)" if card.exhaustion else str(card.value)
 
 
 class TurnController:
-    def __init__(self, game: Game):
+    def __init__(self, game: Game, ai_teams: Iterable[int] = ()):
+        """`ai_teams` : numéros des équipes jouées par l'IA (0 = première équipe) ; leurs cartes sont choisies seules."""
         self.game = game
+        self.ai_teams = frozenset(ai_teams)
+        # cartes révélées au dernier mouvement (toutes les équipes) et numéro de ce tour : pour les afficher
+        self.last_revealed: dict[Rider, Card] = {}
+        self.last_revealed_turn: Optional[int] = None
         self.phase = CHOOSE
         self.log: list[LogLine] = []
         self._drained = 0
@@ -49,6 +58,12 @@ class TurnController:
             return self.game.riders[self.index]
         return None
 
+    def controller_of(self, rider: Rider) -> str:
+        """Qui joue ce coureur : « Joueur », « IA », « Peloton » ou « Muscle »."""
+        if self.game.is_ghost(rider):
+            return self.game.team_type(rider).capitalize()
+        return "IA" if rider.team in self.ai_teams else "Joueur"
+
     def drain_log(self) -> list[LogLine]:
         """Les lignes ajoutées depuis le dernier appel."""
         new = self.log[self._drained :]
@@ -62,17 +77,28 @@ class TurnController:
         self.played = {}
         self.index = 0
         self.phase = CHOOSE
+        self.game.new_turn_cards()
         self._draw_next()
 
     def _draw_next(self) -> None:
         riders = self.game.riders
         while self.index < len(riders):
             rider = riders[self.index]
+            if self.game.is_ghost(rider):  # équipe fantôme (Peloton, Muscle) : sa carte sera retournée au mouvement
+                self.played[rider] = self.game.ghost_card(rider)
+                self.index += 1
+                continue
             hand = self.game.draw_hand_for(rider)
             size = self.game.hand_size(rider)
             if size != 4:
                 wind = "vent arrière" if size > 4 else "vent de face"
                 self.log.append(LogLine(f"{rider.name} : {wind}, pioche {size} cartes", rider.team))
+            if hand and rider.team in self.ai_teams:  # l'IA choisit tout de suite, sans montrer sa main
+                card = choose_card(self.game, rider, hand)
+                self.played[rider] = self.game.play_from_hand(rider, hand, card)
+                self.log.append(LogLine(f"{rider.name} (IA) a posé une carte (face cachée)", rider.team))
+                self.index += 1
+                continue
             if hand:
                 self.hand = hand
                 return
@@ -109,18 +135,25 @@ class TurnController:
         order = sorted(g.riders, key=lambda r: (-r.position, r.lane))  # du premier au dernier
         start = {r: r.position for r in g.riders}
         crashed_before = {r: r.crashed for r in g.riders}
+        self.last_revealed = dict(self.played)  # les cartes sont retournées : tout le monde les voit
+        self.last_revealed_turn = g.turn + 1
         g.movement_phase(self.played)
         self.log.append(LogLine("Mouvement", heading=True))
         for r in order:
             card = self.played[r]
-            effective = g._effective_value(start[r], card.value, crashed_before[r])
-            plain = g._effective_value(start[r], card.value)
+            value = g.last_values.get(r, card.value)  # carte Attaque : 2 en tête, 9 derrière
+            effective = g._effective_value(start[r], value, crashed_before[r])
+            plain = g._effective_value(start[r], value)
             notes = []
+            if g.is_ghost(r):
+                notes.append(f"équipe {g.team_type(r).capitalize()}")
+            if card.special == ATTACK:
+                notes.append(f"ATTAQUE : {value}")
             if crashed_before[r]:
                 notes.append("se relève : −2")
-            if plain > card.value:
-                notes.append("descente : 5 minimum")
-            elif plain < card.value:
+            if plain > value:
+                notes.append("descente : 5 minimum" if g.track.kind(start[r]) == DESCENT else "ravitaillement : 4 minimum")
+            elif plain < value:
                 notes.append("montée : plafonné à 5")
             if r.position - start[r] < effective:
                 notes.append("bloqué : s'arrête avant")

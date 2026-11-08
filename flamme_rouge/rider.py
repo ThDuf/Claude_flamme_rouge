@@ -15,10 +15,13 @@ class Rider:
     recycle: list[Card] = field(default_factory=list)  # défausse de recyclage (face visible)
     hand: list[Card] = field(default_factory=list)  # main en cours de choix (vide hors de la phase d'énergie)
     used: list[Card] = field(default_factory=list)  # cartes jouées : retirées définitivement du jeu
+    label: str = ""  # nom imposé (les deux rouleurs de l'équipe Peloton : « 2P1 », « 2P2 »)
     crashed: bool = False  # à terre après une chute (extension Météo) : se relève au prochain mouvement
 
     @property
     def name(self) -> str:
+        if self.label:
+            return self.label
         return f"{self.team + 1}{'R' if self.kind == ROULEUR else 'S'}"
 
     def draw_hand(self, n: int, rng: random.Random) -> list[Card]:

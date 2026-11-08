@@ -81,7 +81,7 @@ def test_rain_crash_when_blocked():
     g = Game(Track("." * 30), num_teams=2, seed=0, weather=[WeatherZone(6, 12, RAIN)])
     place(g, (12, 0), (12, 1), (7, 0), (1, 0))
     g.crashed_this_turn = []
-    g._move(g.riders[2], card(5))  # vise 12, pleine : s'arrête en 11, sous la pluie -> chute
+    g._move(g.riders[2], 5)  # vise 12, pleine : s'arrête en 11, sous la pluie -> chute
     assert g.riders[2].position == 11 and g.riders[2].crashed
     assert g.crashed_this_turn == [g.riders[2]]
 
@@ -89,14 +89,14 @@ def test_rain_crash_when_blocked():
 def test_rain_without_blocking_is_harmless():
     g = Game(Track("." * 30), num_teams=2, seed=0, weather=[WeatherZone(6, 12, RAIN)])
     place(g, (20, 0), (20, 1), (5, 0), (1, 0))
-    g._move(g.riders[2], card(5))  # 5 -> 10, case libre : pas de chute
+    g._move(g.riders[2], 5)  # 5 -> 10, case libre : pas de chute
     assert g.riders[2].position == 10 and not g.riders[2].crashed
 
 
 def test_blocked_but_not_in_rain_does_not_crash():
     g = Game(Track("." * 30), num_teams=2, seed=0, weather=[WeatherZone(20, 26, RAIN)])
     place(g, (12, 0), (12, 1), (7, 0), (1, 0))
-    g._move(g.riders[2], card(5))
+    g._move(g.riders[2], 5)
     assert g.riders[2].position == 11 and not g.riders[2].crashed
 
 
@@ -105,13 +105,13 @@ def test_square_with_two_crashed_riders_is_blocked_and_chain_crash():
     place(g, (10, 0), (10, 1), (5, 0), (1, 0))
     g.riders[0].crashed = g.riders[1].crashed = True
     assert g.is_blocked(10)
-    g._move(g.riders[2], card(9))  # voudrait aller en 14 : la case 10 barre la route
+    g._move(g.riders[2], 9)  # voudrait aller en 14 : la case 10 barre la route
     assert g.riders[2].position == 9 and g.riders[2].crashed  # 9 est sous la pluie : chute en chaîne
     # une seule file à terre : la case se traverse
     g2 = Game(Track("." * 30), num_teams=2, seed=0, weather=[WeatherZone(6, 12, RAIN)])
     place(g2, (10, 0), (3, 0), (5, 0), (1, 0))
     g2.riders[0].crashed = True
-    g2._move(g2.riders[2], card(9))
+    g2._move(g2.riders[2], 9)
     assert g2.riders[2].position == 14 and not g2.riders[2].crashed
 
 
@@ -131,7 +131,7 @@ def test_standing_up_costs_two_after_descent_and_before_climb_cap():
     assert g._effective_value(14, 6, crashed=True) == 4
     place(g, (8, 0), (20, 0), (30, 0), (30, 1))
     g.riders[0].crashed = True
-    g._move(g.riders[0], card(4))
+    g._move(g.riders[0], 4)
     assert g.riders[0].position == 10 and not g.riders[0].crashed
 
 

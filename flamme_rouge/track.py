@@ -6,6 +6,9 @@ Virage (dessin seulement) : de combien de degrés la route tourne sur la case
 
 Les `start` premières cases forment la grille de départ : elles sont derrière la ligne
 de départ, et c'est là que les coureurs sont placés au début de la course.
+
+Extension Peloton : chaque case a de 1 à 3 files (2 par défaut) et un revêtement :
+'' route normale, COBBLES (pavés, 1 file, pas d'aspiration), SUPPLY (ravitaillement, 3 files).
 """
 from __future__ import annotations
 
@@ -14,6 +17,10 @@ from typing import Optional, Sequence, Union
 NORMAL = "."
 ASCENT = "A"
 DESCENT = "D"
+
+COBBLES = "paves"
+SUPPLY = "ravito"
+DEFAULT_LANES = 2
 
 STRAIGHT = "S"
 LEFT = "L"
@@ -60,6 +67,8 @@ class Track:
         shape: Optional[Shape] = None,
         start: int = 0,
         straights: Optional[Sequence[tuple[int, int]]] = None,
+        lanes: Optional[Sequence[int]] = None,
+        surface: Optional[Sequence[str]] = None,
     ):
         if not layout or any(c not in (NORMAL, ASCENT, DESCENT) for c in layout):
             raise ValueError("Un parcours ne contient que '.', 'A' et 'D' (et n'est pas vide).")
@@ -77,6 +86,28 @@ class Track:
         self.start = start  # nombre de cases de la grille de départ (derrière la ligne de départ)
         # lignes droites (hors départ et arrivée), quand le parcours est fait de tuiles : [(première case, fin)]
         self.straights = None if straights is None else tuple(tuple(s) for s in straights)
+        lanes = tuple(lanes or ())
+        surface = tuple(surface or ())
+        if len(lanes) > len(layout) or len(surface) > len(layout) or any(not 1 <= n <= 3 for n in lanes):
+            raise ValueError("Une case a de 1 à 3 files, et pas plus de cases que le parcours.")
+        self.lane_counts = lanes + (DEFAULT_LANES,) * (len(layout) - len(lanes))
+        self.surfaces = surface + ("",) * (len(layout) - len(surface))
+
+    def lanes(self, square: int) -> int:
+        """Nombre de files de la case (2 hors du parcours)."""
+        if 0 <= square < len(self.lane_counts):
+            return self.lane_counts[square]
+        return DEFAULT_LANES
+
+    def surface(self, square: int) -> str:
+        """Revêtement : '' (route), COBBLES ou SUPPLY."""
+        if 0 <= square < len(self.surfaces):
+            return self.surfaces[square]
+        return ""
+
+    def with_lanes(self, lanes: Sequence[int]) -> "Track":
+        """Copie du parcours avec d'autres nombres de files (le reste est identique)."""
+        return Track(self.layout, self.angles, self.start, self.straights, lanes, self.surfaces)
 
     def __len__(self) -> int:
         return len(self.layout)

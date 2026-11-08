@@ -30,19 +30,21 @@ from flamme_rouge.tiles import (
     summary,
     validate,
 )
-from flamme_rouge.official import OFFICIAL_TILES, official_tile
+from flamme_rouge.official import OFFICIAL_TILES, PELOTON_PROVISIONAL, official_tile
 
 PREVIEW_W, PREVIEW_H = 600, 470
 WINDOW_W, WINDOW_H = 1280, 800
 
 CARD_W, CARD_H = 96, 50
 CARD_COLUMNS = 3
-FLAT_SIDE, MOUNTAIN_SIDE = "plat", "montagne"
+FLAT_SIDE, MOUNTAIN_SIDE, PELOTON_SIDE = "plat", "montagne", "peloton"
 _KIND_ORDER = {KIND_START: 0, KIND_FINISH: 1, KIND_STRAIGHT: 2, KIND_SOFT: 3, KIND_SHARP: 4}
 
 
 def side_letters(side: str) -> list[str]:
     """Les 21 lettres d'une face de la boîte, rangées par type : départ, arrivée, droites, virages doux, serrés."""
+    if side == PELOTON_SIDE:
+        return list(PELOTON_PROVISIONAL)
     letters = "abcdefghijklmnopqrstu" if side == FLAT_SIDE else "ABCDEFGHIJKLMNOPQRSTU"
     return sorted(letters, key=lambda c: (_KIND_ORDER[OFFICIAL_TILES[c].kind], OFFICIAL_TILES[c].direction or "", c))
 
@@ -63,7 +65,8 @@ class TilePalette(tk.Frame):
         self.side_var = tk.StringVar(value=FLAT_SIDE)
         self.selected = "b"
         self.used: set[str] = set()
-        ui.Segmented(self, [(FLAT_SIDE, "Faces plates a–u"), (MOUNTAIN_SIDE, "Faces montagne A–U")], self.side_var,
+        ui.Segmented(self, [(FLAT_SIDE, "Plates a–u"), (MOUNTAIN_SIDE, "Montagne A–U"), (PELOTON_SIDE, "Peloton")],
+                     self.side_var,
                      command=self.redraw).pack(anchor="w", pady=(0, 6))
         grid = tk.Frame(self, bg=pal.BG)
         grid.pack(anchor="w")
@@ -85,11 +88,15 @@ class TilePalette(tk.Frame):
         return official_tile(self.selected)
 
     def _click(self, index: int) -> None:
+        if index >= len(self.letters):
+            return
         self.select(self.letters[index])
         if self.on_pick is not None:
             self.on_pick()
 
     def _double(self, index: int) -> None:
+        if index >= len(self.letters):
+            return
         self.select(self.letters[index])
         if self.on_place is not None:
             self.on_place()
@@ -97,7 +104,7 @@ class TilePalette(tk.Frame):
     def select(self, letter: str) -> None:
         """Choisit une tuile (et affiche la face où elle se trouve)."""
         self.selected = letter
-        self.side_var.set(FLAT_SIDE if letter.islower() else MOUNTAIN_SIDE)
+        self.side_var.set(PELOTON_SIDE if letter in PELOTON_PROVISIONAL else FLAT_SIDE if letter.islower() else MOUNTAIN_SIDE)
         self.redraw()
 
     def set_used(self, letters) -> None:
@@ -105,10 +112,17 @@ class TilePalette(tk.Frame):
         self.redraw()
 
     def redraw(self) -> None:
-        for canvas, letter in zip(self.cards, self.letters):
+        letters = self.letters
+        for i, canvas in enumerate(self.cards):
             canvas.delete("all")
-            prims = tile_card_primitives(official_tile(letter), CARD_W, CARD_H,
-                                         selected=letter == self.selected, used=letter.lower() in self.used)
+            if i >= len(letters):  # face Peloton : deux tuiles seulement, les autres cases restent vides
+                if i == len(letters):
+                    canvas.create_text(4, CARD_H / 2, text="tuiles provisoires,\nen attendant celles\nde la boîte",
+                                       anchor="w", fill=pal.FAINT, font=ui.font(8))
+                continue
+            letter = letters[i]
+            prims = tile_card_primitives(official_tile(letter), CARD_W, CARD_H, selected=letter == self.selected,
+                                         used=letter.lower() in self.used and letter not in PELOTON_PROVISIONAL)
             ui.paint(canvas, prims)
 
 

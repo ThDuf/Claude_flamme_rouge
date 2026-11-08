@@ -119,3 +119,9 @@ def test_mountain_finish_is_two_squares_of_climb_before_the_line():
 def test_build_stage_reports_missing_letters_once_each():
     stage = build_stage("x", "abbc", {"a": make_tile("start")})
     assert stage.missing == ("b", "c") and not stage.available
+
+
+def test_the_six_stage_cards_of_the_base_game():
+    # Relevé sur les cartes étape de la boîte (lettre encadrée = face montagne).
+    assert len(STAGES) == 6
+    assert STAGES["Ballons Centrale"] == "AnLHgceqtrMBoipjDFkSu"

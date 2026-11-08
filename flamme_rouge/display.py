@@ -20,7 +20,7 @@ FINISH = "\033[1;97m"
 ORANGE = "\033[38;5;208m"
 CYAN = "\033[36m"
 # Une couleur par équipe : rouge, bleu, vert, jaune.
-TEAM_COLORS = ["\033[1;91m", "\033[1;94m", "\033[1;92m", "\033[1;93m"]
+TEAM_COLORS = ["\033[1;91m", "\033[1;94m", "\033[1;92m", "\033[1;93m", "\033[1;95m", "\033[1;97m"]
 TERRAIN = {NORMAL: ("·", DIM), ASCENT: ("▲", ORANGE), DESCENT: ("▼", CYAN)}
 
 CELL = 5  # largeur d'une case à l'écran
