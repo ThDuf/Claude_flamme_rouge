@@ -202,6 +202,52 @@ def test_jersey_markers_show_the_next_token_on_the_map_and_profile():
     assert Game(track, num_teams=2, seed=0).tokens == []  # pas de jetons hors Grand Tour
 
 
+def test_token_wins_and_arrivals_explain_themselves():
+    g = Game(Track("." * 20), num_teams=2, seed=0, tour=True, tokens=[TokenStack(10, SPRINT, [5, 3, 1], True)])
+    place(g, (8, 0), (9, 0), (4, 0), (2, 0))
+    g.turn_start = {r: r.position for r in g.riders}
+    place(g, (12, 0), (14, 0), (10, 0), (6, 0))
+    g.check_finish()
+    a, b, c, _d = g.all_riders
+    assert [(w.rider, w.value, w.rank, w.takers) for w in g.token_log] == [(b, 5, 1, 3), (a, 3, 2, 3), (c, 1, 3, 3)]
+    assert "case 10" in g.token_log[0].reason() and "+5 point(s) de Sprint" in g.token_log[0].reason()
+    assert "le plus avancé des 3" in g.token_log[0].reason()
+    g.turn_start = {r: r.position for r in g.riders}
+    place(g, (23, 0), (22, 0), (21, 0), (10, 0))  # a, b et c passent la ligne ensemble
+    g.check_finish()
+    arrival = g.arrival_log[c]
+    assert arrival.leader is a and arrival.seconds == finish_seconds(g.track, 3) and arrival.minutes == 0
+    assert "en tête de son groupe" in arrival.reason() and format_time(arrival.time) in arrival.reason()
+    assert g.minutes[_d] == 1  # pas encore arrivé : un jeton Temps
+
+
+def test_timing_tile_and_time_tokens_on_the_map():
+    from flamme_rouge.boardview import TIME_TOKEN_FILL, map_primitives
+    from flamme_rouge.stage import timing_table
+
+    track = official(0)
+    g = Game(track, num_teams=2, seed=0, tour=True)
+    texts = [p[3] for p in map_primitives(g) if p[0] == "text"]
+    assert all(f"+{s}" in texts for s in timing_table(track))
+    g.minutes[g.riders[0]] = 2
+    prims = map_primitives(g)
+    assert any(p[0] == "oval" and p[5] == TIME_TOKEN_FILL for p in prims) and "2'" in [p[3] for p in prims if p[0] == "text"]
+    assert "+50" not in [p[3] for p in map_primitives(Game(track, num_teams=2, seed=0)) if p[0] == "text"]
+
+
+def test_follow_camera_frames_the_head_or_the_peloton():
+    from flamme_rouge.boardview import FOLLOW_HEAD, FOLLOW_MIN_SQUARES, FOLLOW_PELOTON, follow_view, follow_window
+
+    g = Game(Track("." * 60), num_teams=3, seed=0)
+    place(g, (30, 0), (29, 0), (12, 0), (11, 0), (11, 1), (10, 0))  # 2 devant, 4 derrière
+    head, peloton = follow_window(g, FOLLOW_HEAD), follow_window(g, FOLLOW_PELOTON)
+    assert head[0] <= 29 and head[1] >= 30 + 5 and head[1] - head[0] + 1 >= FOLLOW_MIN_SQUARES
+    assert peloton[0] <= 10 and peloton[1] >= 12 and peloton[1] < 29
+    assert follow_view(g, FOLLOW_HEAD)[1] > follow_view(g, FOLLOW_PELOTON)[1]  # la tête est plus loin sur la route
+    g.riders.clear()
+    assert follow_window(g, FOLLOW_HEAD) is None
+
+
 def test_jersey_holders_wear_them_on_the_next_stage():
     from flamme_rouge.boardview import JERSEY_RING, JERSEY_YELLOW, map_primitives, profile_primitives
 

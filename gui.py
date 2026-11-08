@@ -21,6 +21,8 @@ import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
+from flamme_rouge.boardview import FOLLOW_HEAD, FOLLOW_PELOTON, follow_view, jersey_primitives
+from flamme_rouge.stage import MOUNTAIN, SPRINT, format_time
 from flamme_rouge.boardview import podium_primitives, profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
 from flamme_rouge.geometry import layout_squares, point_on_road
 from flamme_rouge.controller import (
@@ -63,6 +65,10 @@ ACTION_TEXT = {
 
 PROFILE_H = 100
 WINDOW_W, WINDOW_H = 1040, 985
+TOUR_PANEL_W = 230  # Grand Tour : largeur du panneau des jetons et des temps
+PANEL_PER_ROW = 4  # pastilles par ligne dans ce panneau
+CAMERA_ALL = "tout"
+CAMERA_CHOICES = [(CAMERA_ALL, "Tout le parcours"), (FOLLOW_PELOTON, "Zoom peloton"), (FOLLOW_HEAD, "Zoom tête de course")]
 
 
 class App:
@@ -93,6 +99,8 @@ class App:
         self.podium_job = None
         self.fx_start = time.monotonic()
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
+        # caméra : "tout" (le parcours entier), "peloton" ou "tete" (suit ce groupe), "" (cadrage manuel)
+        self.camera_var = tk.StringVar(value=CAMERA_ALL)
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
         self._build()
         self.refresh()
@@ -144,10 +152,9 @@ class App:
         bar.pack(fill="x", padx=14, pady=(8, 0))
         ui.FlatButton(bar, "＋", lambda: self.zoom_at(1.4), size=11, padx=12, pady=4).pack(side="left")
         ui.FlatButton(bar, "－", lambda: self.zoom_at(1 / 1.4), size=11, padx=12, pady=4).pack(side="left", padx=(4, 0))
-        ui.FlatButton(bar, "Vue auto", self.reset_view, size=9, style="ghost", padx=10, pady=5).pack(side="left", padx=(4, 0))
-        tk.Label(bar, text="molette = zoom · glisser = déplacer · clic = passer l'animation", font=ui.font(8), bg=pal.BG, fg=pal.FAINT).pack(
-            side="left", padx=10
-        )
+        ui.Segmented(bar, CAMERA_CHOICES, self.camera_var, command=self.set_camera).pack(side="left", padx=(10, 0))
+        tk.Label(bar, text="molette = zoom · glisser = déplacer\nclic = passer l'animation", font=ui.font(8), bg=pal.BG,
+                 fg=pal.FAINT, justify="left").pack(side="left", padx=10)
         ui.Toggle(bar, "Mode secret", self.secret_var, command=self.refresh).pack(side="right")
         ui.Toggle(bar, "Animations", self.animate_var).pack(side="right")
 
@@ -163,6 +170,13 @@ class App:
         hand_card.pack(side="left", fill="y", anchor="n")
         self.hand_frame = tk.Frame(hand_card, bg=pal.CARD)
         self.hand_frame.pack(padx=16, pady=14)
+
+        self.tour_panel = None
+        if self.game.tour:  # Grand Tour : jetons gagnés et temps, sur le côté (survol = explication)
+            panel_card = ui.card(bottom)
+            panel_card.pack(side="right", fill="y", padx=(14, 0))
+            self.tour_panel = tk.Frame(panel_card, bg=pal.CARD, width=TOUR_PANEL_W)
+            self.tour_panel.pack(fill="both", expand=True, padx=10, pady=8)
 
         right = tk.Frame(bottom, bg=pal.BG)
         right.pack(side="right", fill="both", expand=True, padx=(14, 0))
@@ -239,14 +253,26 @@ class App:
         else:
             base = self.view or self._auto_view()
         self.view = zoom_view(base, factor, x, y)
+        self.camera_var.set("")  # zoom à la main : on ne suit plus de groupe
         self._paint_map()
 
     def on_wheel(self, event) -> None:
         self.zoom_at(1.25 if event.delta > 0 else 0.8, event.x, event.y)
 
     def reset_view(self) -> None:
+        self.camera_var.set(CAMERA_ALL)
+        self.set_camera()
+
+    def set_camera(self) -> None:
+        """Choix de la caméra : tout le parcours, ou un zoom qui suit le peloton / la tête de course."""
         self.view = None
         self._paint_map()
+
+    def _follow_camera(self) -> None:
+        """Caméra de suivi : recadre sur le groupe suivi (appelé à chaque dessin de la carte)."""
+        which = self.camera_var.get()
+        if which in (FOLLOW_PELOTON, FOLLOW_HEAD):
+            self.view = follow_view(self.game, which)  # None (plus personne en course) : tout le parcours
 
     def on_press(self, event) -> None:
         self._drag = [event.x, event.y, False]
@@ -259,6 +285,7 @@ class App:
             return
         self._drag = [event.x, event.y, True]
         self.view = pan_view(self.view or self._auto_view(), dx, dy)
+        self.camera_var.set("")  # déplacement à la main : on ne suit plus de groupe
         self._paint_map()
 
     def on_release(self, _event) -> None:
@@ -418,6 +445,7 @@ class App:
         self._paint_map()
         if self.anim is None:  # le classement se met à jour une fois les coureurs arrivés
             self._show_standings()
+            self._show_tour_panel()
         self._show_revealed_cards()
 
         self._show_hand()
@@ -439,6 +467,7 @@ class App:
                                                      jerseys=self.game.jerseys))
             return
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
+        self._follow_camera()
         shapes = map_primitives(
             self.game,
             self.ctl.current_rider,
@@ -486,6 +515,79 @@ class App:
             tk.Label(chip, text=f"{place}", font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, padx=3).pack(side="left")
             tk.Label(chip, text=rider.name, font=ui.font(9, True), bg=pal.TEAM_FILL[rider.team], fg=pal.LABEL_ON_FILL[rider.team], padx=4).pack(side="left", pady=2)
             tk.Label(chip, text=f"{rider.position}", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, padx=3).pack(side="left")
+
+    def _show_tour_panel(self) -> None:
+        """Grand Tour : les jetons Sprint (maillot vert) et Montagne (à pois) gagnés pendant l'étape, puis les
+        temps (jetons Temps d'une minute, arrivées). Au survol, l'infobulle dit pourquoi."""
+        panel = self.tour_panel
+        if panel is None:
+            return
+        for widget in panel.winfo_children():
+            widget.destroy()
+        g = self.game
+
+        def heading(text: str, top: int = 8) -> None:
+            tk.Label(panel, text=text, font=ui.font(8, True), bg=pal.CARD, fg=pal.FAINT, anchor="w").pack(
+                fill="x", pady=(top, 2))
+
+        def rider_chip(parent, rider) -> None:
+            tk.Label(parent, text=rider.name, font=ui.font(8, True), bg=pal.TEAM_FILL[rider.team],
+                     fg=pal.LABEL_ON_FILL[rider.team], padx=3).pack(side="left", padx=(4, 0))
+
+        for kind, title in ((SPRINT, "SPRINT · MAILLOT VERT"), (MOUNTAIN, "MONTAGNE · MAILLOT À POIS")):
+            heading(title, 0 if kind == SPRINT else 4)
+            wins = [w for w in g.token_log if w.kind == kind]
+            if not wins:
+                left = [s for s in g.tokens if s.kind == kind and s.values]
+                text = ("à prendre : " + ", ".join(f"case {s.square} ({'·'.join(map(str, s.values))})" for s in left)
+                        if left else "aucun jeton")
+                tk.Label(panel, text=text, font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, anchor="w", justify="left",
+                         wraplength=TOUR_PANEL_W - 10).pack(fill="x")
+                continue
+            row = None
+            for i, win in enumerate(wins):
+                if i % PANEL_PER_ROW == 0:
+                    row = tk.Frame(panel, bg=pal.CARD)
+                    row.pack(fill="x", pady=1)
+                chip = tk.Frame(row, bg=pal.CARD_HI, cursor="question_arrow")
+                chip.pack(side="left", padx=(0, 4))
+                icon = tk.Canvas(chip, width=20, height=20, bg=pal.CARD_HI, highlightthickness=0)
+                ui.paint(icon, jersey_primitives(10, 10, 18, kind, win.value))
+                icon.pack(side="left")
+                rider_chip(chip, win.rider)
+                ui.Tooltip(chip, win.reason())
+
+        heading("TEMPS", 4)
+        times = tk.Frame(panel, bg=pal.CARD)
+        times.pack(fill="x")
+        shown = 0
+        for rider in g.arrived:  # arrivés : leur temps d'étape
+            arrival = g.arrival_log.get(rider)
+            chip = tk.Frame(times, bg=pal.CARD_HI, cursor="question_arrow")
+            chip.grid(row=shown // PANEL_PER_ROW, column=shown % PANEL_PER_ROW, sticky="w", padx=(0, 4), pady=1)
+            rider_chip(chip, rider)
+            tk.Label(chip, text=format_time(g.stage_time[rider]), font=ui.font(8, True), bg=pal.CARD_HI,
+                     fg=pal.GOOD, padx=3).pack(side="left")
+            if arrival is not None:
+                ui.Tooltip(chip, arrival.reason())
+            shown += 1
+        for rider in g.riders:  # encore en course : jetons Temps déjà pris
+            minutes = g.minutes.get(rider, 0)
+            if not minutes:
+                continue
+            chip = tk.Frame(times, bg=pal.CARD_HI, cursor="question_arrow")
+            chip.grid(row=shown // PANEL_PER_ROW, column=shown % PANEL_PER_ROW, sticky="w", padx=(0, 4), pady=1)
+            rider_chip(chip, rider)
+            tk.Label(chip, text=f"⏱ {minutes}'", font=ui.font(8, True), bg=pal.CARD_HI, fg=pal.TEXT, padx=3).pack(
+                side="left")
+            ui.Tooltip(chip, f"{rider.name} n'a pas encore passé la ligne : {minutes} jeton(s) Temps d'une minute.\n"
+                             "Après la première arrivée, chaque coureur pas encore arrivé en prend un à la fin "
+                             "de chaque tour.")
+            shown += 1
+        if not shown:
+            tk.Label(times, text="jetons Temps : dès qu'un coureur passe la ligne, chacun des autres prend 1 minute "
+                                 "par tour", font=ui.font(8), bg=pal.CARD, fg=pal.MUTED, anchor="w", justify="left",
+                     wraplength=TOUR_PANEL_W - 10).grid(row=0, column=0, sticky="w")
 
     def _show_revealed_cards(self) -> None:
         """Les cartes jouées au dernier mouvement par chaque coureur, avec qui le joue (Joueur, IA, Peloton,

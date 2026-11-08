@@ -117,6 +117,63 @@ class FlatButton(tk.Label):
             self._command()
 
 
+class Tooltip:
+    """Infobulle : `text` s'affiche près de la souris quand elle survole `widget` (et ses enfants)."""
+
+    DELAY_MS = 250
+
+    def __init__(self, widget, text: str):
+        self.widget, self.text = widget, text
+        self.tip = None
+        self.job = None
+        for w in [widget, *widget.winfo_children()]:
+            w.bind("<Enter>", self._schedule, add="+")
+            w.bind("<Leave>", self._hide, add="+")
+            w.bind("<Destroy>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel()
+        self.job = self.widget.after(self.DELAY_MS, self.show)
+
+    def _cancel(self) -> None:
+        if self.job is not None:
+            try:
+                self.widget.after_cancel(self.job)
+            except tk.TclError:
+                pass
+            self.job = None
+
+    def show(self) -> None:
+        self.job = None
+        if self.tip is not None or not self.widget.winfo_exists():
+            return
+        x = self.widget.winfo_pointerx() + 14
+        y = self.widget.winfo_pointery() + 16
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.attributes("-topmost", True)
+        tk.Label(self.tip, text=self.text, font=font(9), bg=pal.PANEL, fg=pal.TEXT, justify="left", padx=10, pady=6,
+                 wraplength=360, highlightthickness=1, highlightbackground=pal.ACCENT).pack()
+        self.tip.update_idletasks()
+        # reste dans l'écran : bascule à gauche / au-dessus de la souris près des bords
+        sw, sh = self.tip.winfo_screenwidth(), self.tip.winfo_screenheight()
+        tw, th = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
+        if x + tw > sw:
+            x = max(0, x - tw - 28)
+        if y + th > sh:
+            y = max(0, y - th - 32)
+        self.tip.wm_geometry(f"+{x}+{y}")
+
+    def _hide(self, _event=None) -> None:
+        self._cancel()
+        if self.tip is not None:
+            try:
+                self.tip.destroy()
+            except tk.TclError:
+                pass
+            self.tip = None
+
+
 def _trace_while_alive(widget, variable, callback) -> None:
     """Suit `variable` tant que `widget` existe : la trace est retirée quand il est détruit (une même variable
     sert à plusieurs écrans qui se reconstruisent)."""

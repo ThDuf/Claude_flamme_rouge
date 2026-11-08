@@ -21,7 +21,7 @@ from .extensions import METEO, PELOTON, check_extensions
 from .rider import Rider
 from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, SUPPLY, Track
 from .weather import Weather, WeatherZone, draw_weather
-from .stage import MOUNTAIN, SPRINT, TokenStack, finish_seconds
+from .stage import MOUNTAIN, SPRINT, Arrival, TokenStack, TokenWin, finish_seconds
 
 HAND_SIZE = 4
 MOUNTAIN_SPEED = 5  # plafond en montée ET minimum en descente
@@ -129,6 +129,8 @@ class Game:
         self.tokens = [TokenStack(t.square, t.kind, list(t.values), t.major) for t in (tokens or [])]
         self.points: dict[str, dict[Rider, int]] = {SPRINT: {}, MOUNTAIN: {}}
         self.jerseys: dict[Rider, str] = {}  # Grand Tour : maillot porté (jaune, vert, pois), posé par le Tour
+        self.token_log: list[TokenWin] = []  # jetons Majeur/Mineur gagnés, dans l'ordre, avec leur raison
+        self.arrival_log: dict[Rider, Arrival] = {}  # arrivée de chaque coureur : secondes, minutes, groupe
         self.last_tokens: list[tuple[Rider, TokenStack, int]] = []  # jetons pris au dernier tour
         self.last_arrivals: list[Rider] = []  # coureurs arrivés au dernier tour
         self.turn_start: dict[Rider, int] = {r: r.position for r in self.riders}
@@ -495,12 +497,14 @@ class Game:
         self.last_tokens = []
         for stack in self.tokens:
             takers = [r for r in self.riders if self.turn_start.get(r, r.position) < stack.square <= r.position]
-            for rider in sorted(takers, key=lambda r: (-r.position, r.lane)):
+            for rank, rider in enumerate(sorted(takers, key=lambda r: (-r.position, r.lane)), 1):
                 if not stack.values:
                     break
                 value = stack.values.pop(0)
                 self.points[stack.kind][rider] = self.points[stack.kind].get(rider, 0) + value
                 self.last_tokens.append((rider, stack, value))
+                self.token_log.append(TokenWin(rider, stack.kind, value, stack.major, stack.square, self.turn + 1,
+                                               rank, len(takers), rider.position))
 
     def _tour_end_of_turn(self) -> None:
         """Fin de tour d'une étape de Tour (après l'aspiration et la fatigue) : jetons, puis les coureurs qui ont
@@ -515,7 +519,11 @@ class Game:
             for rider in crossed:
                 pack = next(p for p in packs if rider.position in p)
                 front = max(pack)
-                self.stage_time[rider] = self.minutes[rider] * 60 + finish_seconds(self.track, front - finish)
+                leader = next(r for r in crossed if r.position == front)
+                seconds = finish_seconds(self.track, front - finish)
+                self.stage_time[rider] = self.minutes[rider] * 60 + seconds
+                self.arrival_log[rider] = Arrival(rider, self.turn + 1, front - finish, seconds, self.minutes[rider],
+                                                  leader)
             self.arrived.extend(crossed)
             self.riders = [r for r in self.riders if r not in crossed]
         if self.arrived:

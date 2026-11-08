@@ -54,6 +54,11 @@ def test_menu_then_a_whole_game_then_back(root):
     assert len(app.game.riders) == 6
     assert app.ctl.ai_teams == frozenset({1, 2})
     assert app.game.extensions == frozenset({"meteo"})
+    app.camera_var.set("tete")  # caméra qui suit la tête de course
+    app.set_camera()
+    assert app.view is not None
+    app.camera_var.set("peloton")  # puis le peloton, pendant toute la partie
+    app.set_camera()
     turns = 0
     while app.ctl.phase != FINISHED and turns < 100:
         while app.ctl.phase == CHOOSE:
@@ -71,8 +76,10 @@ def test_menu_then_a_whole_game_then_back(root):
     assert app._podium_visible()
     app.on_release(None)
     app.zoom_at(2.0)
+    assert app.camera_var.get() == ""  # zoom à la main : plus de suivi
     app.zoom_at(1.5, 300, 200)
     app.reset_view()
+    assert app.camera_var.get() == "tout" and app.view is None
     app.on_back()
     assert launcher.app is None
 

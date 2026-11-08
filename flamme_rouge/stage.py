@@ -39,6 +39,62 @@ class TokenStack:
         return f"{'Majeur' if self.major else 'Mineur'} {'Sprint' if self.kind == SPRINT else 'Montagne'}"
 
 
+@dataclass
+class TokenWin:
+    """Un jeton Majeur/Mineur gagné pendant l'étape, avec de quoi expliquer pourquoi."""
+
+    rider: object  # le coureur (Rider)
+    kind: str  # SPRINT ou MOUNTAIN
+    value: int
+    major: bool
+    square: int  # case de la pile
+    turn: int  # tour de jeu où il a été pris
+    rank: int  # 1 = le plus avancé des coureurs qui ont atteint la pile ce tour-là
+    takers: int  # combien de coureurs ont atteint la pile ce tour-là
+    position: int  # case du coureur en fin de tour
+
+    @property
+    def label(self) -> str:
+        return f"{'Majeur' if self.major else 'Mineur'} {'Sprint' if self.kind == SPRINT else 'Montagne'}"
+
+    def reason(self) -> str:
+        """« Tour 7 : 1R est entré sur la case 40 (pile Majeur Sprint) en premier → 5 points de Sprint »."""
+        what = "Sprint" if self.kind == SPRINT else "Montagne"
+        how = f"est entré sur la case {self.square} ou l'a passée (case {self.position} en fin de tour)"
+        if self.takers > 1:
+            order = "le plus avancé" if self.rank == 1 else f"{self.rank}e plus avancé"
+            how += f", {order} des {self.takers} coureurs arrivés à la pile ce tour-là"
+        else:
+            how += ", seul à l'atteindre ce tour-là"
+        return f"Tour {self.turn} : {getattr(self.rider, 'name', '?')} {how}.\nJeton {self.label} : +{self.value} point(s) de {what}."
+
+
+@dataclass
+class Arrival:
+    """L'arrivée d'un coureur : le temps vient du coureur de tête de son groupe (tuile Chronométrage)."""
+
+    rider: object
+    turn: int
+    beyond: int  # cases après la ligne du coureur de tête de son groupe (0 = première case)
+    seconds: int  # secondes de la tuile Chronométrage
+    minutes: int  # jetons Temps d'une minute pris avant d'arriver
+    leader: object  # coureur de tête de son groupe
+
+    @property
+    def time(self) -> int:
+        return self.minutes * 60 + self.seconds
+
+    def reason(self) -> str:
+        name = getattr(self.rider, "name", "?")
+        lead = getattr(self.leader, "name", "?")
+        group = "" if self.leader is self.rider else f" (temps de {lead}, en tête de son groupe)"
+        minutes = (f"{self.minutes} jeton(s) Temps d'une minute" if self.minutes
+                   else "aucun jeton Temps : arrivé au premier tour d'arrivée")
+        return (f"Tour {self.turn} : {name} passe la ligne. Tuile Chronométrage, case {self.beyond + 1} après la "
+                f"ligne{group} : +{self.seconds} s.\n{minutes[0].upper() + minutes[1:]}. "
+                f"Temps d'étape : {format_time(self.time)}.")
+
+
 def climbs_of(track: Track) -> list[tuple[int, int]]:
     """Les montées continues : (première case, case juste après la dernière)."""
     runs, s, n = [], 0, len(track)
@@ -81,9 +137,14 @@ def place_tokens(track: Track) -> list[TokenStack]:
     return stacks
 
 
+def timing_table(track: Track) -> tuple[int, ...]:
+    """Le côté de la tuile Chronométrage à utiliser : montée (5 valeurs) si l'arrivée est en montée, sinon plaine."""
+    return TIMING_MOUNTAIN if len(track) and track.kind(len(track) - 1) == ASCENT else TIMING_FLAT
+
+
 def finish_seconds(track: Track, beyond: int) -> int:
     """Secondes de la tuile Chronométrage pour un coureur `beyond` cases après la ligne (0 = première case)."""
-    table = TIMING_MOUNTAIN if len(track) and track.kind(len(track) - 1) == ASCENT else TIMING_FLAT
+    table = timing_table(track)
     return table[min(max(beyond, 0), len(table) - 1)]
 
 

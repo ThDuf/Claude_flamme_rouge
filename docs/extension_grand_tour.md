@@ -96,6 +96,12 @@ quelques cartes du paquet et certaines cartes ont un pouvoir :
   repos), puis « Qui joue ? » (nombre d'équipes, joueurs/IA, extensions et options).
 - Pendant une étape : petits maillots près des piles de jetons (valeur du prochain jeton) et maillot porté par
   le leader de chaque classement (sur la carte et en anneau sur le profil).
+- Tuile Chronométrage dessinée dans les cases après la ligne (+50 … +0) ; jetons Temps (« 1' », « 2' »…) près des
+  coureurs pas encore arrivés.
+- Panneau sur le côté : jetons Sprint (maillot vert) et Montagne (à pois) gagnés, puis temps ; au survol,
+  l'infobulle explique pourquoi (tour, case de la pile, rang parmi les coureurs qui l'ont atteinte ; tuile
+  Chronométrage, groupe, jetons Temps).
+- Caméra de la carte : « Tout le parcours », « Zoom peloton », « Zoom tête de course ».
 - Étape de Tour (`Game(tour=True)`, `flamme_rouge/stage.py`) : l'étape continue jusqu'à ce que tout le monde
   ait passé la ligne ; temps (minutes + secondes de la tuile Chronométrage, temps du coureur de tête du groupe) ;
   pas de fatigue pour les arrivés ; jetons Majeur/Mineur Sprint et Montagne.
