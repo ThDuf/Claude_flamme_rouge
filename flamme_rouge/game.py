@@ -342,9 +342,11 @@ class Game:
             value = max(value, SUPPLY_SPEED)
         if crashed:
             value = max(value - CRASH_PENALTY, 0)
-        # Montée : plafond de 5 si on démarre sur, entre dans, ou traverse une case de montée.
-        if any(self.track.kind(s) == ASCENT for s in range(start, start + value + 1)):
-            value = min(value, MOUNTAIN_SPEED)
+        # Montée : plafond de 5 si on démarre sur, entre dans, ou traverse une case de montée ; mais on peut toujours
+        # avancer jusqu'à la case juste avant la montée (un 9 avec la montée à la 8e case avance de 7, pas de 5).
+        first_up = next((s for s in range(start, start + value + 1) if self.track.kind(s) == ASCENT), None)
+        if first_up is not None:
+            value = min(value, max(MOUNTAIN_SPEED, first_up - start - 1))
         return value
 
     def is_full(self, square: int, exclude: Optional[Rider] = None) -> bool:

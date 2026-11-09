@@ -22,7 +22,8 @@ const el = (tag, attrs = {}, ...children) => {
 
 // ------------------------------------------------------------------ réseau
 
-const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null };
+const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null,
+                  anim: null, playedAnim: null, animate: true };
 
 function store(key, value) {
   try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (e) { /* privé */ }
@@ -182,9 +183,11 @@ async function poll() {
     const state = await get("/api/state", { code: session.code, token: session.token, since: session.version,
                                             camera: session.camera });
     if (!state.same) {
+      const previousVersion = session.version;
+      const hadRace = !!(session.state && session.state.race && session.state.code === state.code);
       session.version = state.version;
       session.state = state;
-      render(state);
+      render(state, previousVersion, hadRace);
     }
   } catch (e) {
     if (e.status === 400) { // salon disparu ou jeton inconnu : retour à l'accueil
@@ -200,8 +203,15 @@ async function poll() {
   pollTimer = setTimeout(poll, POLL_MS);
 }
 
-function render(state) {
-  if (state.lobby) { show("lobby"); renderLobby(state); } else { show("race"); renderRace(state); }
+function render(state, previousVersion, hadRace) {
+  if (state.lobby) {
+    session.anim = null;
+    show("lobby");
+    renderLobby(state);
+  } else {
+    show("race");
+    renderRace(state, previousVersion, hadRace);
+  }
 }
 
 // ------------------------------------------------------------------ salon
@@ -305,19 +315,247 @@ async function seatAction(team) {
   try { await api("/api/seat", { team }); poll(); } catch (e) { showError("lobby-error", e); }
 }
 
-// ------------------------------------------------------------------ course
+// ------------------------------------------------------------------ animations (mouvement, aspiration, météo)
+// Mêmes calculs que flamme_rouge/animation.py et les effets météo de boardview.py : le serveur envoie la géométrie
+// de la route (bords droit et gauche de chaque case, en pixels) et celle du profil ; on anime ici, à ~30 images/s.
 
-function renderRace(state) {
+const MOVE_DURATION = 0.6, MOVE_GAP = 0.08, MOVE_TOTAL_MAX = 4.5, SLIPSTREAM_DURATION = 0.7;
+const frac = (x) => x - Math.floor(x);
+const ease = (t) => { t = Math.min(Math.max(t, 0), 1); return t * t * (3 - 2 * t); };
+
+function mix(c1, c2, f) { // couleur entre c1 (f = 0) et c2 (f = 1), comme boardview._mix
+  f = Math.min(Math.max(f, 0), 1);
+  const a = [1, 3, 5].map((i) => parseInt(c1.slice(i, i + 2), 16));
+  const b = [1, 3, 5].map((i) => parseInt(c2.slice(i, i + 2), 16));
+  return "#" + a.map((x, i) => Math.round(x + (b[i] - x) * f).toString(16).padStart(2, "0")).join("");
+}
+
+function roadPoint(road, progress, lane) { // comme geometry.point_on_road + SquareGeom.lane_center
+  const last = road.length - 1;
+  progress = Math.min(Math.max(progress, 0), last);
+  const i = Math.min(Math.floor(progress), Math.max(last - 1, 0));
+  const f = progress - i;
+  const at = (row) => {
+    const [rx, ry, lx, ly, lanes] = row;
+    const g = (lane + 0.5) / lanes;
+    return [rx + (lx - rx) * g, ry + (ly - ry) * g];
+  };
+  const here = at(road[i]);
+  if (last === 0) return here;
+  const next = at(road[i + 1]);
+  return [here[0] + (next[0] - here[0]) * f, here[1] + (next[1] - here[1]) * f];
+}
+
+function makeAnimation(data) { // comme movement_animation / slipstream_animation
+  let moves = data.moves.slice();
+  let duration = SLIPSTREAM_DURATION, stagger = 0;
+  if (data.kind === "movement") {
+    moves.sort((a, b) => b.from[0] - a.from[0] || a.from[1] - b.from[1]); // le plus avancé part en premier
+    duration = Math.min(MOVE_DURATION, MOVE_TOTAL_MAX / Math.max(moves.length, 1) - MOVE_GAP);
+    stagger = duration + MOVE_GAP;
+  }
+  return {
+    moves, duration, stagger,
+    total: moves.length ? stagger * (moves.length - 1) + duration : 0,
+    positions(t) {
+      const out = {};
+      moves.forEach((m, k) => {
+        const e = ease((t - k * stagger) / duration);
+        out[m.name] = [m.from[0] + (m.to[0] - m.from[0]) * e, m.from[1] + (m.to[1] - m.from[1]) * e];
+      });
+      return out;
+    },
+  };
+}
+
+function riderShapes(race, positions) { // les pastilles des coureurs, comme dans map_primitives
+  const c = session.info.colors;
+  const { road, radius, font } = race.geo;
+  const where = race.riders.map((r) => ({ r, at: positions[r.name] || [r.position, r.lane] }));
+  where.sort((a, b) => a.at[0] - b.at[0]); // ceux de derrière d'abord
+  const shapes = [];
+  for (const { r, at } of where) {
+    const [cx, cy] = roadPoint(road, at[0], at[1]);
+    shapes.push(["oval", cx - radius + 1.5, cy - radius + 3, cx + radius + 1.5, cy + radius + 3, c.shadow, "", 0]);
+    shapes.push(["oval", cx - radius, cy - radius, cx + radius, cy + radius, TEAM_FILL[r.team], c.rider_outline, 2]);
+    shapes.push(["text", cx, cy, r.name, LABEL_ON_FILL[r.team], font, true, "center"]);
+  }
+  return shapes;
+}
+
+function mapWeatherShapes(race, t) { // comme boardview.map_weather_fx_primitives
+  const c = session.info.colors, fx = c.effects;
+  const { road, first, last, scale } = race.geo;
+  const px = Math.max(scale, 6);
+  const at = (p, l) => roadPoint(road, p, l);
+  const shapes = [];
+  race.weather.forEach((zone, k) => {
+    const start = Math.max(zone.start, first), end = Math.min(zone.end, last + 1, road.length);
+    if (start >= end) return;
+    const length = end - start, seed = frac(k * 0.37);
+    if (zone.effect === fx.rain) {
+      for (let d = 0; d < 4 * length; d++) {
+        const phase = frac(d * 0.618 + seed);
+        const p = start + frac(d * 0.381 + seed * 3.1) * length;
+        const lane = -0.4 + frac(d * 0.727 + seed) * 1.8;
+        const [x, y] = at(p, lane);
+        const f = frac(t * 0.9 + phase);
+        if (f < 0.35) {
+          const drop = 0.5 * px * (1 - f / 0.35);
+          shapes.push(["line", x - drop * 0.3, y - drop - 3, x - drop * 0.3 + 2, y - drop + 3, c.rain, 1]);
+        } else {
+          const g = (f - 0.35) / 0.65, r = 1.5 + g * 0.22 * px;
+          shapes.push(["oval", x - r, y - r * 0.6, x + r, y + r * 0.6, "", mix(c.rain, c.road, g), 1]);
+        }
+      }
+    } else if (zone.effect === fx.tailwind || zone.effect === fx.headwind) {
+      const dir = zone.effect === fx.tailwind ? 1 : -1, color = c.wind[zone.effect];
+      for (let d = 0; d < 3 * length; d++) {
+        const phase = frac(d * 0.29 + seed), lane = -0.6 + frac(d * 0.53 + seed) * 2.2;
+        const f = frac(t * 0.45 + phase);
+        const head = start + (dir > 0 ? f : 1 - f) * length, tail = head - 0.7 * dir;
+        if (tail < start || tail > end) continue;
+        const [x0, y0] = at(tail, lane), [x1, y1] = at(head, lane);
+        shapes.push(["line", x0, y0, x1, y1, mix(c.grass, color, 0.5 + 0.5 * Math.sin(f * Math.PI)), 2]);
+      }
+    } else if (zone.effect === fx.crosswind) {
+      const color = c.wind[zone.effect];
+      for (const depth of [0.35, 0.65, 1.0]) {
+        const count = Math.max(2, Math.floor(length * 1.5));
+        for (let d = 0; d < count; d++) {
+          const phase = frac(d * 0.41 + depth * 0.77 + seed), p = start + ((d + 0.5) / count) * length;
+          const f = frac(t * (0.25 + 0.45 * depth) + phase), lane = 2.6 - f * 4.0, streak = 0.35 + 0.6 * depth;
+          const [x0, y0] = at(p, lane + streak), [x1, y1] = at(p, lane);
+          const lift = (1 - depth) * 0.18 * px, fade = Math.sin(f * Math.PI);
+          shapes.push(["line", x0, y0 - lift, x1, y1 - lift, mix(c.grass, color, (0.3 + 0.7 * depth) * fade),
+                       depth < 0.5 ? 1 : depth < 0.9 ? 2 : 3]);
+        }
+      }
+    } else if (zone.effect === fx.sunny) {
+      const [cx, cy] = at(start + length / 2, 2.8), r = Math.max(4, Math.min(9, 0.22 * px));
+      shapes.push(["oval", cx - r, cy - r, cx + r, cy + r, c.sun, c.sun, 1]);
+      for (let ray = 0; ray < 8; ray++) {
+        const a = t * 0.8 + (ray * Math.PI) / 4;
+        shapes.push(["line", cx + Math.cos(a) * (r + 2), cy + Math.sin(a) * (r + 2),
+                     cx + Math.cos(a) * (r + 2 + r * 0.7), cy + Math.sin(a) * (r + 2 + r * 0.7), c.sun, 2]);
+      }
+    }
+  });
+  return shapes;
+}
+
+function profileWeatherShapes(race, t) { // comme boardview.weather_fx_primitives
+  const c = session.info.colors, fx = c.effects;
+  const { x0: px0, sx, ys, n, top } = race.profile_geo;
+  const xOf = (i) => px0 + i * sx;
+  const yAt = (s) => {
+    const i = Math.max(0, Math.min(n, Math.floor(s))), j = Math.min(n, i + 1), f = Math.max(0, Math.min(1, s - i));
+    return ys[i] + (ys[j] - ys[i]) * f;
+  };
+  const shapes = [];
+  race.weather.forEach((zone, k) => {
+    const end = Math.min(zone.end, n), x0 = xOf(zone.start), x1 = xOf(end);
+    const w = Math.max(x1 - x0, 1), seed = (k * 0.37) % 1;
+    const lowest = () => { let m = Infinity; for (let s = zone.start; s < end; s++) m = Math.min(m, yAt(s + 0.5)); return m; };
+    if (zone.effect === fx.rain) {
+      const count = Math.max(6, Math.floor(w / 7));
+      for (let d = 0; d < count; d++) {
+        const phase = (d * 0.618 + seed) % 1, x = x0 + ((d + 0.5) * w) / count;
+        const ground = yAt(zone.start + ((x - x0) / w) * (end - zone.start));
+        const y = top + ((t * 1.6 + phase) % 1) * Math.max(ground - top - 4, 1);
+        shapes.push(["line", x, y, x - 2, y + 6, c.rain, 1]);
+      }
+    } else if (c.wind[zone.effect]) {
+      const dir = zone.effect === fx.tailwind ? 1 : zone.effect === fx.headwind ? -1 : 0, color = c.wind[zone.effect];
+      const ground = lowest();
+      for (let d = 0; d < 4; d++) {
+        const phase = (d * 0.29 + seed) % 1, level = ground - 8 - d * 6;
+        if (dir) {
+          const f = (t * 0.7 + phase) % 1, x = x0 + (dir > 0 ? f : 1 - f) * w, tail = x - 10 * dir;
+          shapes.push(["line", Math.max(Math.min(tail, x1), x0), level, Math.max(Math.min(x, x1), x0), level, color, 2]);
+          shapes.push(["line", x, level, x - 3 * dir, level - 2, color, 1]);
+        } else {
+          for (let g = 0; g < 2; g++) {
+            const f = frac(t * 0.55 + phase + g * 0.5), cx = x0 + frac(d * 0.31 + g * 0.47 + seed) * w;
+            const cy = ground - 10 - frac(d * 0.59 + g * 0.23) * 22 + f * 8, size = 2 + 10 * f;
+            shapes.push(["line", cx - size, cy - size * 0.25, cx + size, cy + size * 0.25,
+                         mix(c.card, color, Math.sin(f * Math.PI)), f < 0.4 ? 1 : f < 0.75 ? 2 : 3]);
+          }
+        }
+      }
+    } else if (zone.effect === fx.sunny) {
+      const cx = (x0 + x1) / 2, cy = lowest() - 16, r = 4.5;
+      shapes.push(["oval", cx - r, cy - r, cx + r, cy + r, c.sun, c.sun, 1]);
+      for (let ray = 0; ray < 8; ray++) {
+        const a = t * 0.8 + (ray * Math.PI) / 4;
+        shapes.push(["line", cx + Math.cos(a) * (r + 2), cy + Math.sin(a) * (r + 2),
+                     cx + Math.cos(a) * (r + 5), cy + Math.sin(a) * (r + 5), c.sun, 1]);
+      }
+    }
+  });
+  return shapes;
+}
+
+// Le plateau : la carte complète, ou, pendant un déplacement, la route seule avec les coureurs qui roulent par-dessus.
+function drawBoard() {
+  const state = session.state;
+  if (!state || !state.race) return;
   const race = state.race;
   const [w, h, ph] = race.size;
+  const podium = race.finished && race.podium && session.showPodium;
+  if (session.anim) paint($("map"), session.anim.race.map_base, w, h);
+  else paint($("map"), podium ? race.podium : race.map, w, h);
+  paint($("profile"), race.profile, w, ph);
+}
+
+function maybeStartAnimation(race, previousVersion, hadRace) {
+  const data = race.anim;
+  if (!data || data.id === session.playedAnim) return;
+  session.playedAnim = data.id;
+  // pas de replay au premier chargement (ou après un rechargement) : seulement ce qui vient d'arriver
+  if (!hadRace || data.id <= previousVersion || !session.animate) return;
+  session.anim = { race, anim: makeAnimation(data), start: performance.now() };
+}
+
+let lastFrame = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (now - lastFrame < 33) return; // ~30 images par seconde
+  lastFrame = now;
+  const state = session.state;
+  if (!state || !state.race || $("race").classList.contains("hidden")) return;
+  const race = state.race;
+  const [w, h, ph] = race.size;
+  const t = now / 1000;
+  let mapShapes = [];
+  if (session.anim) {
+    const a = session.anim;
+    const elapsed = (now - a.start) / 1000;
+    if (elapsed >= a.anim.total) { // fin du déplacement : la carte complète revient
+      session.anim = null;
+      drawBoard();
+    } else {
+      mapShapes = riderShapes(a.race, a.anim.positions(elapsed));
+    }
+  }
+  const podium = race.finished && race.podium && session.showPodium && !session.anim;
+  const weather = session.animate && race.weather.length;
+  if (weather && !podium) mapShapes = mapShapes.concat(mapWeatherShapes(session.anim ? session.anim.race : race, t));
+  paint($("map-fx"), mapShapes, w, h);
+  paint($("profile-fx"), weather ? profileWeatherShapes(race, t) : [], w, ph);
+}
+
+// ------------------------------------------------------------------ course
+
+function renderRace(state, previousVersion, hadRace) {
+  const race = state.race;
   $("subtitle").textContent = race.finished ? "Arrivée" : `Tour ${race.turn}`;
   $("turn").textContent = race.finished ? "ARRIVÉE" : `TOUR ${race.turn}`;
   $("phase-title").textContent = race.title;
   $("waiting").textContent = race.finished ? race.winner : race.waiting;
 
-  const podium = race.finished && race.podium && session.showPodium;
-  paint($("map"), podium ? race.podium : race.map, w, h);
-  paint($("profile"), race.profile, w, ph);
+  if (previousVersion !== undefined) maybeStartAnimation(race, previousVersion, hadRace);
+  drawBoard();
   $("toggle-podium").classList.toggle("hidden", !race.finished);
   $("toggle-podium").textContent = session.showPodium ? "Revoir la course" : "Voir le podium";
   $("back-lobby").classList.toggle("hidden", !(race.finished && state.me.host));
@@ -406,6 +644,21 @@ async function start() {
     session.showPodium = !session.showPodium;
     if (session.state) renderRace(session.state);
   });
+  // animations (déplacements, météo) : réglage propre à ce navigateur
+  session.animate = load("fr-animate") !== "0";
+  const animToggle = $("animate");
+  const paintToggle = () => {
+    animToggle.classList.toggle("on", session.animate);
+    animToggle.textContent = (session.animate ? "✓ " : "") + "Animations";
+  };
+  paintToggle();
+  animToggle.addEventListener("click", () => {
+    session.animate = !session.animate;
+    store("fr-animate", session.animate ? "1" : "0");
+    if (!session.animate && session.anim) { session.anim = null; drawBoard(); }
+    paintToggle();
+  });
+  requestAnimationFrame(frame);
   for (const b of $("camera").querySelectorAll("button")) {
     b.addEventListener("click", () => { session.camera = b.dataset.camera; session.version = 0; poll(); });
   }

@@ -128,6 +128,16 @@ def test_ascent_caps_movement_when_starting_on_it():
     assert rider(g, "0r").position == 5
 
 
+def test_a_big_card_still_reaches_the_foot_of_a_far_climb():
+    # montée à la 8e case : un 9 avance jusqu'à la case juste avant la montée (7), pas seulement de 5
+    g = make("." * 8 + "AAAA" + "." * 10, {"0r": 0})
+    move(g, {"0r": 9})
+    assert rider(g, "0r").position == 7
+    assert g._effective_value(0, 9) == 7 and g._effective_value(0, 7) == 7  # le 7 n'entre pas dans la montée
+    assert g._effective_value(2, 9) == 5  # montée à la 6e case : on ne peut pas aller plus loin que 5
+    assert g._effective_value(8, 9) == 5  # départ en montée : 5 au plus
+
+
 def test_ascent_out_of_reach_does_not_cap():
     g = make("....A......", {"0r": 0})
     move(g, {"0r": 3})

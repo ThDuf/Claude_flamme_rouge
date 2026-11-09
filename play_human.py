@@ -85,7 +85,7 @@ def show_movement(game: Game, played, order, start) -> None:
         if effective > wanted:
             notes.append("descente : 5 minimum")
         elif effective < wanted:
-            notes.append("montée : plafonné à 5")
+            notes.append("montée : plafonné à 5" if effective <= 5 else f"montée : s'arrête au pied ({effective})")
         if rider.position - start[rider] < effective:
             notes.append("case pleine : s'arrête avant")
         note = f"  ({', '.join(notes)})" if notes else ""

@@ -39,9 +39,13 @@ Sans tunnel, `python -m online.server --lan` rend le jeu joignable depuis les ap
 - Il ne sert que trois fichiers (`online/static`) et l'API du jeu : aucun accès à tes dossiers.
 - Toute personne qui a le lien peut ouvrir la page ; pour entrer dans une partie, il faut son code.
 
+- Animations (bouton « Animations », réglage de chaque navigateur) : les coureurs roulent pendant le mouvement
+  (l'un après l'autre, du premier au dernier) et l'aspiration ; pluie, vent et soleil animés sur la carte et le
+  profil (extension Météo). Elles ne se rejouent pas quand on recharge la page.
+
 ## Pas encore en ligne
 
-Grand Tour, variante Échappée, éditeur de parcours, animations des mouvements et de la météo.
+Grand Tour, variante Échappée, éditeur de parcours.
 
 ## Technique
 
@@ -50,3 +54,9 @@ Grand Tour, variante Échappée, éditeur de parcours, animations des mouvements
   (`/api/state?since=<version>` ne renvoie rien si rien n'a changé).
 - `online/static/` : la page ; elle dessine les formes de `boardview.py` sur des `<canvas>`, comme `ui.paint`
   le fait dans Tkinter.
+- Animations : le serveur envoie la route sans les coureurs, la géométrie de la route en pixels (bords droit et
+  gauche de chaque case : `road_geometry`) et celle du profil (`profile_geometry`), les zones météo et le dernier
+  déplacement. `app.js` refait les calculs de `animation.py` et des effets météo de `boardview.py` sur un calque
+  transparent, à ~30 images par seconde.
+- Le serveur refuse de démarrer si le port est déjà pris (sous Windows, deux serveurs pourraient sinon écouter le
+  même port sans erreur).

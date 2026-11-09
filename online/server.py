@@ -22,6 +22,17 @@ if __package__ in (None, ""):  # lancé comme un script : le dossier du jeu doit
 
 from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError  # noqa: E402
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
+from flamme_rouge import palette as pal  # noqa: E402
+from flamme_rouge.boardview import FX_RAIN, FX_SUN, FX_WIND  # noqa: E402
+from flamme_rouge.weather import CROSSWIND, HEADWIND, RAIN, SUNNY, TAILWIND  # noqa: E402
+
+# couleurs des animations du navigateur (les mêmes que dans Tkinter)
+FX_COLORS = {
+    "rain": FX_RAIN, "sun": FX_SUN, "wind": {k: v for k, v in FX_WIND.items()},
+    "grass": pal.GRASS, "road": pal.TERRAIN_FILL["."], "card": pal.CARD, "shadow": pal.SHADOW,
+    "rider_outline": pal.RIDER_OUTLINE, "effects": {"rain": RAIN, "tailwind": TAILWIND, "headwind": HEADWIND,
+                                                    "crosswind": CROSSWIND, "sunny": SUNNY},
+}
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
@@ -50,7 +61,7 @@ class Api:
         if method == "GET" and path == "/api/info":
             return {"parcours": self.lobby.parcours_list(), "teams": TEAM_COLORS,
                     "extensions": [{"key": k, "label": v[0], "description": v[1]} for k, v in EXTENSIONS.items()],
-                    "seat_kinds": SEAT_KINDS}
+                    "seat_kinds": SEAT_KINDS, "colors": FX_COLORS}
         if method == "POST" and path == "/api/create":
             room, player = self.lobby.create(body.get("name"))
             return {"code": room.code, "token": player.token}
@@ -150,9 +161,20 @@ def make_handler(api: Api):
     return Handler
 
 
+class GameServer(ThreadingHTTPServer):
+    # Sous Windows, « réutiliser l'adresse » laisse deux serveurs écouter le même port sans erreur (l'ancien
+    # continue de répondre) : on refuse plutôt de démarrer si le port est déjà pris.
+    allow_reuse_address = os.name != "nt"
+
+
 def serve(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
     api = Api()
-    httpd = ThreadingHTTPServer((host, port), make_handler(api))
+    try:
+        httpd = GameServer((host, port), make_handler(api))
+    except OSError:
+        print(f"Le port {port} est déjà utilisé : un serveur Flamme Rouge tourne sans doute déjà "
+              f"(ferme sa fenêtre), ou choisis-en un autre avec --port.")
+        sys.exit(1)
     httpd.daemon_threads = True
     shown = "127.0.0.1" if host in ("127.0.0.1", "0.0.0.0") else host
     print(f"Flamme Rouge en ligne : http://{shown}:{port}  (Ctrl+C pour arrêter)")

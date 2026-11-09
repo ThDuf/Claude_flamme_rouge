@@ -17,9 +17,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from flamme_rouge.animation import moves_between, snapshot
 from flamme_rouge.boardview import (
-    BOARD_W, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, follow_view, map_primitives, podium_primitives, profile_primitives,
-    track_preview_primitives,
+    BOARD_W, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, follow_view, map_primitives, podium_primitives, profile_geometry,
+    profile_primitives, road_geometry, track_preview_primitives,
 )
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
 from flamme_rouge.controller import CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
@@ -92,6 +93,7 @@ class Room:
     game: Optional[Game] = None
     ctl: Optional[TurnController] = None
     ai_teams: frozenset = frozenset()
+    last_anim: Optional[dict] = None  # dernier mouvement ou aspiration, rejoué par les navigateurs
     version: int = 1
     touched: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -221,7 +223,7 @@ class Room:
 
     def back_to_lobby(self, player: Player) -> None:
         self._require_host(player)
-        self.game = self.ctl = None
+        self.game = self.ctl = self.last_anim = None
         self.bump()
 
     # ------------------------------------------------------------------ course
@@ -244,8 +246,18 @@ class Room:
             raise OnlineError("Les spectateurs ne peuvent pas faire avancer la course.")
         if phase != ctl.phase or ctl.phase not in ACTION_TEXT:
             return
+        before = snapshot(self.game.riders)
         ctl.advance()
         self.bump()
+        moves = moves_between(before, [r for r in self.game.all_riders if r in before]) \
+            if phase in (MOVEMENT, SLIPSTREAM) else []
+        # le navigateur rejoue ce déplacement une fois (identifié par la version qui l'a produit)
+        self.last_anim = {
+            "id": self.version,
+            "kind": "movement" if phase == MOVEMENT else "slipstream",
+            "moves": [{"name": m.rider.name, "team": m.rider.team, "from": list(m.start), "to": list(m.end)}
+                      for m in moves],
+        } if moves else None
 
     def _running(self) -> TurnController:
         if self.ctl is None:
@@ -300,6 +312,15 @@ class Room:
             shared = {
                 "map": map_primitives(g, rider, view=view),
                 "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather),
+                # pour les animations du navigateur : la route sans coureurs, sa géométrie, celle du profil
+                "map_base": map_primitives(g, view=view, draw_riders=False),
+                "geo": road_geometry(g, view),
+                "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
+                "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane}
+                           for r in g.riders],
+                "anim": self.last_anim,
+                "weather": [{"start": z.start, "end": z.end, "effect": z.effect} for z in g.weather.zones]
+                if g.weather else [],
             }
             if ctl.phase == FINISHED:
                 names = [self.team_label(t) for t in range(len(g.team_types))]

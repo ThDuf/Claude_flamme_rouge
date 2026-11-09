@@ -255,7 +255,7 @@ class TurnController:
             if plain > value:
                 notes.append("descente : 5 minimum" if g.track.kind(start[r]) == DESCENT else "ravitaillement : 4 minimum")
             elif plain < value:
-                notes.append("montée : plafonné à 5")
+                notes.append("montée : plafonné à 5" if plain <= 5 else f"montée : s'arrête au pied ({plain})")
             if r.position - start[r] < effective:
                 notes.append("bloqué : s'arrête avant")
             if r in g.crashed_this_turn:

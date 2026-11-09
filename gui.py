@@ -142,7 +142,7 @@ class App:
         if self.side_panel:
             ui.place_window(self.root, WINDOW_W + SIDE_PANEL_W + 14, WINDOW_H)
             middle = tk.Frame(root, bg=pal.BG)
-            middle.pack(fill="x", padx=14, pady=(12, 0))
+            middle.pack(padx=14, pady=(12, 0))  # pas étiré : carte + panneau restent centrés dans la fenêtre
             board_card = ui.card(middle)
             board_card.pack(side="left")
             side_card = ui.card(middle)
