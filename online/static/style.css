@@ -66,6 +66,8 @@ canvas { display: block; width: 100%; height: auto; }
 .title { font-size: 20px; font-weight: 700; }
 /* la carte et le profil (1000 × 530) tiennent dans la hauteur de l'écran, avec la main en dessous à portée */
 .board { padding: 0; overflow: hidden; max-width: max(640px, calc((100vh - 330px) * 1000 / 530)); margin: 0 auto; }
+.layer { position: relative; }
+.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .tools { margin: 10px 0; }
 .segmented { display: flex; gap: 4px; }
 .segmented button.on { background: var(--accent); border-color: var(--accent); color: #fff; }

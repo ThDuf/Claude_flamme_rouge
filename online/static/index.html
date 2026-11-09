@@ -72,8 +72,9 @@
       <span class="muted" id="waiting"></span>
     </div>
     <div class="board card">
-      <canvas id="map" width="1000" height="430"></canvas>
-      <canvas id="profile" width="1000" height="100"></canvas>
+      <!-- un calque transparent par-dessus chaque dessin : coureurs qui roulent, pluie, vent, soleil -->
+      <div class="layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas></div>
+      <div class="layer"><canvas id="profile" width="1000" height="100"></canvas><canvas id="profile-fx" class="overlay"></canvas></div>
     </div>
     <div class="row gap wrap tools">
       <div class="segmented" id="camera">
@@ -81,6 +82,7 @@
         <button data-camera="peloton">Zoom peloton</button>
         <button data-camera="tete">Zoom tête de course</button>
       </div>
+      <div class="segmented"><button id="animate" title="Déplacements et météo animés">✓ Animations</button></div>
       <button id="toggle-podium" class="hidden">Revoir la course</button>
       <button id="back-lobby" class="hidden">Revenir au salon</button>
     </div>

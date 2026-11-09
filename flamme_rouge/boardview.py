@@ -497,6 +497,36 @@ def map_weather_fx_primitives(
     return prims
 
 
+def rider_token_size(scale: float) -> tuple[float, int]:
+    """Rayon de la pastille d'un coureur et taille de son nom, selon l'échelle de la carte (pixels par case)."""
+    radius = max(7.5, min(24, 0.32 * scale))
+    return radius, 8 if radius < 9 else 9 if radius < 11 else 11 if radius < 16 else 14
+
+
+def road_geometry(game: Game, view=None, width: int = BOARD_W, height: int = MAP_H) -> dict:
+    """La route en pixels pour un navigateur qui anime lui-même coureurs et météo, dans le cadrage de
+    map_primitives : pour chaque case, le milieu de son bord droit et de son bord gauche, et son nombre de files.
+    Le centre de la file `l` d'une case est alors droite + (l + 0,5) / files × (gauche − droite), comme
+    `SquareGeom.lane_center` ; entre deux cases, on mélange en ligne droite, comme `point_on_road`."""
+    squares, first, last, scale, tr = _map_frame(game, False, None, width, height, view)
+    rows = []
+    for sq in squares:
+        (rx, ry), (lx, ly) = tr(((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2)), \
+            tr(((sq.lb[0] + sq.lf[0]) / 2, (sq.lb[1] + sq.lf[1]) / 2))
+        rows.append([rx, ry, lx, ly, sq.lanes])
+    radius, font = rider_token_size(scale)
+    return {"road": rows, "first": first, "last": last, "scale": scale, "radius": radius, "font": font}
+
+
+def profile_geometry(track: Track, width: int, height: int) -> dict:
+    """Le repère du profil pour les animations du navigateur : x de la case 0, largeur d'une case, y de la route
+    à chaque case entière (entre deux cases, c'est une ligne droite) et haut de la zone des effets."""
+    n = len(track)
+    _heights, _base, x_of, _y_of, y_at = _profile_frame(track, width, height)
+    return {"x0": x_of(0), "sx": x_of(1) - x_of(0), "ys": [y_at(s) for s in range(n + 1)], "n": n,
+            "top": PROFILE_PAD_TOP - 6}
+
+
 def map_primitives(
     game: Game,
     current: Optional[Rider] = None,
@@ -506,6 +536,7 @@ def map_primitives(
     width: int = BOARD_W,
     height: int = MAP_H,
     view: Optional[tuple[float, float, float]] = None,
+    draw_riders: bool = True,
 ) -> list[tuple]:
     """La route en 2D, virages compris : le parcours entier, ou un zoom qui suit le peloton.
 
@@ -576,12 +607,13 @@ def map_primitives(
         prims.append(("text", (x0 + x1) / 2, min(y0, y1) - 16, "ARRIVÉE", "#ffffff", 10, True, "center"))
 
     _weather_panels(prims, squares, game.weather, first, last, tr, scale)
+    if not draw_riders:  # la route seule (le navigateur anime les coureurs par-dessus)
+        return prims
 
     where = {r: (r.position, r.lane) for r in game.riders}
     if positions:
         where.update(positions)
-    radius = max(7.5, min(24, 0.32 * scale))
-    font_size = 8 if radius < 9 else 9 if radius < 11 else 11 if radius < 16 else 14
+    radius, font_size = rider_token_size(scale)
     crash_labels: set[int] = set()
     for rider in sorted(game.riders, key=lambda r: where[r][0]):  # ceux de derrière d'abord, devant par-dessus
         progress, lane = where[rider]
