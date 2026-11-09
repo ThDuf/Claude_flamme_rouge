@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flamme Rouge en ligne</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="logo">FLAMME <span>ROUGE</span></div>
+    <div class="subtitle" id="subtitle">Parties à distance</div>
+    <div class="room-chip hidden" id="room-chip"></div>
+  </header>
+
+  <!-- accueil : créer ou rejoindre -->
+  <main id="home" class="screen">
+    <section class="card narrow">
+      <h2>Ton nom</h2>
+      <input id="name" maxlength="20" placeholder="ex. Alice" autocomplete="nickname">
+      <div class="row gap">
+        <button class="primary" id="create">Créer une partie</button>
+      </div>
+      <h2>Rejoindre une partie</h2>
+      <div class="row gap">
+        <input id="code" maxlength="4" placeholder="CODE" class="code-input" autocomplete="off">
+        <button id="join">Rejoindre</button>
+      </div>
+      <p class="error" id="home-error"></p>
+    </section>
+  </main>
+
+  <!-- salon : réglages et places -->
+  <main id="lobby" class="screen hidden">
+    <div class="lobby-grid">
+      <section class="card">
+        <h2>Partie <span class="code" id="lobby-code"></span></h2>
+        <p class="muted">Envoie ce lien à tes amis :</p>
+        <div class="row gap"><input id="share" readonly><button id="copy">Copier</button></div>
+        <h3>Équipes</h3>
+        <div id="seats"></div>
+        <p class="muted small">Une place « Joueur » restée libre au départ est jouée par l'IA.</p>
+        <h3>Joueurs connectés</h3>
+        <div id="players" class="muted"></div>
+      </section>
+      <section class="card">
+        <h2>Parcours</h2>
+        <div id="host-settings">
+          <div class="row gap wrap">
+            <select id="parcours"></select>
+            <select id="teams"></select>
+          </div>
+          <div class="row gap wrap" id="extensions"></div>
+        </div>
+        <p id="guest-settings" class="muted"></p>
+        <canvas id="preview" width="700" height="300"></canvas>
+        <canvas id="preview-profile" width="700" height="110"></canvas>
+        <div class="row space">
+          <span class="muted" id="lobby-details"></span>
+          <button class="primary big" id="start">▶ Lancer la course</button>
+        </div>
+        <p class="error" id="lobby-error"></p>
+      </section>
+    </div>
+  </main>
+
+  <!-- course -->
+  <main id="race" class="screen hidden">
+    <div class="race-head">
+      <span class="badge" id="turn">TOUR 1</span>
+      <span class="title" id="phase-title"></span>
+      <span class="muted" id="waiting"></span>
+    </div>
+    <div class="board card">
+      <canvas id="map" width="1000" height="430"></canvas>
+      <canvas id="profile" width="1000" height="100"></canvas>
+    </div>
+    <div class="row gap wrap tools">
+      <div class="segmented" id="camera">
+        <button data-camera="">Tout le parcours</button>
+        <button data-camera="peloton">Zoom peloton</button>
+        <button data-camera="tete">Zoom tête de course</button>
+      </div>
+      <button id="toggle-podium" class="hidden">Revoir la course</button>
+      <button id="back-lobby" class="hidden">Revenir au salon</button>
+    </div>
+    <div id="revealed" class="revealed"></div>
+    <div class="race-bottom">
+      <section class="card hand">
+        <div id="hand-title" class="hand-title"></div>
+        <div id="hand" class="cards"></div>
+        <div id="my-riders" class="muted small"></div>
+      </section>
+      <section class="race-right">
+        <button class="primary big" id="action" disabled></button>
+        <div class="log card" id="log"></div>
+      </section>
+    </div>
+    <p class="error" id="race-error"></p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
