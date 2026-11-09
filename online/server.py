@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):  # lancé comme un script : le dossier du jeu doit être importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError  # noqa: E402
+from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, parse_view  # noqa: E402
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
 from flamme_rouge import palette as pal  # noqa: E402
 from flamme_rouge.boardview import FX_RAIN, FX_SUN, FX_WIND  # noqa: E402
@@ -73,9 +73,10 @@ class Api:
             if method == "GET" and path == "/api/state":
                 since = int(query.get("since") or 0)
                 camera = str(query.get("camera") or "")
+                view = parse_view(query.get("view"))
                 if since == room.version:
                     return {"same": True, "version": room.version}
-                return compact(room.state(player, camera))
+                return compact(room.state(player, camera, view))
             if method != "POST":
                 raise OnlineError("Action inconnue.")
             if path == "/api/seat":
@@ -83,7 +84,10 @@ class Api:
                 room.take_seat(player, None if team is None else int(team))
             elif path == "/api/settings":
                 room.configure(player, body.get("parcours"), body.get("teams"), body.get("extensions"),
-                               body.get("seats"))
+                               body.get("seats"), body.get("breakaway"))
+            elif path == "/api/bid_rider":
+                name = body.get("rider")
+                room.bid_rider(player, None if name is None else str(name))
             elif path == "/api/start":
                 room.start(player)
             elif path == "/api/card":

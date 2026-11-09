@@ -23,7 +23,9 @@ const el = (tag, attrs = {}, ...children) => {
 // ------------------------------------------------------------------ réseau
 
 const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null,
-                  anim: null, playedAnim: null, animate: true };
+                  anim: null, playedAnim: null, animate: true,
+                  view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
+                  previewing: false }; // un zoom est affiché en attendant le dessin net du serveur
 
 function store(key, value) {
   try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (e) { /* privé */ }
@@ -61,16 +63,22 @@ const ANCHORS = {
   w: ["left", "middle"], nw: ["left", "top"], ne: ["right", "top"], sw: ["left", "bottom"], se: ["right", "bottom"],
 };
 
-function setupCanvas(canvas, w, h) {
-  const ratio = window.devicePixelRatio || 1;
-  if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
-    canvas.width = Math.round(w * ratio);
-    canvas.height = Math.round(h * ratio);
-  }
+// Le canvas a autant de pixels qu'il en occupe à l'écran (largeur affichée × densité de l'écran) : les formes,
+// prévues pour w × h, sont agrandies en vectoriel, donc nettes, au lieu d'être une petite image étirée (floue).
+function setupCanvas(canvas, w, h, xf) {
   canvas.style.aspectRatio = `${w} / ${h}`;
+  const shown = canvas.clientWidth || w;
+  const ratio = (window.devicePixelRatio || 1) * (shown / w);
+  const pw = Math.max(1, Math.round(w * ratio)), ph = Math.max(1, Math.round(h * ratio));
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw;
+    canvas.height = ph;
+  }
   const ctx = canvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, pw, ph);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, w, h);
+  if (xf) ctx.transform(xf[0], 0, 0, xf[0], xf[1], xf[2]); // aperçu d'un zoom en attendant le serveur
   return ctx;
 }
 
@@ -80,8 +88,8 @@ function finish(ctx, fill, outline, width) {
 }
 
 // Même rôle que ui.paint (Tkinter) : rect, oval, poly, path, line, text.
-function paint(canvas, shapes, w, h) {
-  const ctx = setupCanvas(canvas, w, h);
+function paint(canvas, shapes, w, h, xf) {
+  const ctx = setupCanvas(canvas, w, h, xf);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (const s of shapes || []) {
@@ -145,7 +153,8 @@ function show(screen) {
 async function enter(code, token) {
   session.code = code;
   session.token = token;
-  session.version = 0;
+  session.version = session.seenVersion = 0;
+  session.view = null;
   store("fr-session-" + code, token);
   history.replaceState(null, "", "?code=" + code);
   $("room-chip").innerHTML = "";
@@ -177,19 +186,26 @@ async function onJoin() {
 }
 
 let pollTimer = null;
+let pollSeq = 0; // seule la réponse à la dernière demande compte (un zoom peut partir pendant une autre demande)
 async function poll() {
   clearTimeout(pollTimer);
+  const seq = ++pollSeq;
   try {
-    const state = await get("/api/state", { code: session.code, token: session.token, since: session.version,
-                                            camera: session.camera });
+    const params = { code: session.code, token: session.token, since: session.version, camera: session.camera };
+    if (session.view) params.view = session.view.map((v) => v.toFixed(2)).join(",");
+    const state = await get("/api/state", params);
+    if (seq !== pollSeq) return; // une demande plus récente est partie : elle reprendra la boucle
     if (!state.same) {
-      const previousVersion = session.version;
+      session.previewing = false;
+      // dernière version vraiment reçue (un zoom remet `version` à 0 pour forcer un dessin, pas pour rejouer)
+      const previousVersion = session.seenVersion || 0;
       const hadRace = !!(session.state && session.state.race && session.state.code === state.code);
-      session.version = state.version;
+      session.version = session.seenVersion = state.version;
       session.state = state;
       render(state, previousVersion, hadRace);
     }
   } catch (e) {
+    if (seq !== pollSeq) return;
     if (e.status === 400) { // salon disparu ou jeton inconnu : retour à l'accueil
       store("fr-session-" + session.code, null);
       session.code = session.token = null;
@@ -206,6 +222,7 @@ async function poll() {
 function render(state, previousVersion, hadRace) {
   if (state.lobby) {
     session.anim = null;
+    session.view = null; // le prochain parcours repart en vue complète
     show("lobby");
     renderLobby(state);
   } else {
@@ -260,12 +277,15 @@ function renderLobby(state) {
   $("guest-settings").textContent = host ? "" :
     `${lobby.parcours_label} · ${lobby.teams} équipes · ` +
     (lobby.extensions.length ? "extensions : " + lobby.extensions.join(", ") : "jeu de base") +
+    (lobby.breakaway_available && lobby.breakaway ? " · variante Échappée" : "") +
     " — l'hôte règle la partie.";
   if (host) {
     if (document.activeElement !== $("parcours")) $("parcours").value = lobby.parcours;
     if (document.activeElement !== $("teams")) $("teams").value = String(lobby.teams);
     for (const box of $("extensions").querySelectorAll("input")) box.checked = lobby.extensions.includes(box.value);
+    $("breakaway").checked = lobby.breakaway;
   }
+  $("breakaway-row").classList.toggle("hidden", !(host && lobby.breakaway_available));
   const [w, h, ph] = lobby.preview_size;
   paint($("preview"), lobby.preview.map, w, h);
   paint($("preview-profile"), lobby.preview.profile, w, ph);
@@ -297,6 +317,7 @@ function buildSettings() {
     });
     $("extensions").append(el("label", { class: "ext", title: ext.description }, box, ext.label));
   }
+  $("breakaway").addEventListener("change", () => settings({ breakaway: $("breakaway").checked }));
 }
 
 async function settings(change) {
@@ -496,6 +517,90 @@ function profileWeatherShapes(race, t) { // comme boardview.weather_fx_primitive
   return shapes;
 }
 
+// ------------------------------------------------------------------ zoom et déplacement de la carte
+// Comme boardview.zoom_view / pan_view. Le navigateur agrandit tout de suite ce qu'il a déjà (aperçu), puis
+// demande au serveur un dessin net de ce cadrage (numéros de case, chevrons, taille des coureurs).
+
+const MIN_SCALE = 3, MAX_SCALE = 140;
+
+function zoomView([s, cx, cy], f, px, py, W, H) {
+  const ns = Math.min(Math.max(s * f, MIN_SCALE), MAX_SCALE);
+  const wx = cx + (px - W / 2) / s, wy = cy - (py - H / 2) / s;
+  return [ns, wx - (px - W / 2) / ns, wy + (py - H / 2) / ns];
+}
+
+function panView([s, cx, cy], dx, dy) {
+  return [s, cx - dx / s, cy + dy / s];
+}
+
+let viewTimer = null;
+function setView(view) {
+  const race = session.state && session.state.race;
+  if (!race || (race.finished && race.podium && session.showPodium)) return; // pas de zoom sur le podium
+  if (session.anim) session.anim = null; // un déplacement en cours s'arrête net
+  session.view = view;
+  session.camera = "";
+  for (const b of $("camera").querySelectorAll("button")) b.classList.remove("on");
+  // aperçu : les formes déjà reçues, passées du cadrage dessiné au nouveau
+  const [s, cx, cy] = race.view, [ns, ncx, ncy] = view;
+  const [w, h] = race.size, k = ns / s;
+  const xf = [k, w / 2 - (k * w) / 2 + (cx - ncx) * ns, h / 2 - (k * h) / 2 - (cy - ncy) * ns];
+  session.previewing = true;
+  paint($("map"), race.map, w, h, xf);
+  paint($("map-fx"), [], w, h);
+  clearTimeout(viewTimer);
+  viewTimer = setTimeout(() => { session.version = 0; poll(); }, 150); // dessin net quand on s'arrête
+}
+
+function mapPoint(event) { // position de la souris en coordonnées du plateau (1000 × 430)
+  const canvas = $("map"), [w, h] = session.state.race.size;
+  const rect = canvas.getBoundingClientRect();
+  return [((event.clientX - rect.left) / rect.width) * w, ((event.clientY - rect.top) / rect.height) * h];
+}
+
+function currentView() {
+  return session.view || session.state.race.view;
+}
+
+function setupZoom() {
+  const layer = $("map-layer");
+  layer.addEventListener("wheel", (event) => {
+    if (!session.state || !session.state.race) return;
+    event.preventDefault();
+    const [px, py] = mapPoint(event), [w, h] = session.state.race.size;
+    setView(zoomView(currentView(), event.deltaY < 0 ? 1.25 : 0.8, px, py, w, h));
+  }, { passive: false });
+  const button = (factor) => () => {
+    if (!session.state || !session.state.race) return;
+    const [w, h] = session.state.race.size;
+    setView(zoomView(currentView(), factor, w / 2, h / 2, w, h));
+  };
+  $("zoom-in").addEventListener("click", button(1.4));
+  $("zoom-out").addEventListener("click", button(1 / 1.4));
+  let drag = null;
+  layer.addEventListener("pointerdown", (event) => {
+    if (!session.state || !session.state.race || event.button !== 0) return;
+    drag = { at: mapPoint(event), moved: false };
+    layer.setPointerCapture(event.pointerId);
+  });
+  layer.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    const p = mapPoint(event), dx = p[0] - drag.at[0], dy = p[1] - drag.at[1];
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    drag.moved = true;
+    drag.at = p;
+    layer.classList.add("dragging");
+    setView(panView(currentView(), dx, dy));
+  });
+  const stop = () => { drag = null; layer.classList.remove("dragging"); };
+  layer.addEventListener("pointerup", stop);
+  layer.addEventListener("pointercancel", stop);
+  window.addEventListener("resize", () => { // nouvelle taille d'affichage : on redessine net
+    if (!session.state) return;
+    if (session.state.race) drawBoard(); else renderLobby(session.state);
+  });
+}
+
 // Le plateau : la carte complète, ou, pendant un déplacement, la route seule avec les coureurs qui roulent par-dessus.
 function drawBoard() {
   const state = session.state;
@@ -523,7 +628,7 @@ function frame(now) {
   if (now - lastFrame < 33) return; // ~30 images par seconde
   lastFrame = now;
   const state = session.state;
-  if (!state || !state.race || $("race").classList.contains("hidden")) return;
+  if (!state || !state.race || $("race").classList.contains("hidden") || session.previewing) return;
   const race = state.race;
   const [w, h, ph] = race.size;
   const t = now / 1000;
@@ -559,7 +664,9 @@ function renderRace(state, previousVersion, hadRace) {
   $("toggle-podium").classList.toggle("hidden", !race.finished);
   $("toggle-podium").textContent = session.showPodium ? "Revoir la course" : "Voir le podium";
   $("back-lobby").classList.toggle("hidden", !(race.finished && state.me.host));
-  for (const b of $("camera").querySelectorAll("button")) b.classList.toggle("on", b.dataset.camera === session.camera);
+  for (const b of $("camera").querySelectorAll("button")) {
+    b.classList.toggle("on", !session.view && b.dataset.camera === session.camera);
+  }
 
   // cartes révélées au dernier mouvement
   const rev = $("revealed");
@@ -576,24 +683,39 @@ function renderRace(state, previousVersion, hadRace) {
   // ma main
   const hand = $("hand");
   hand.innerHTML = "";
-  if (race.my_turn) {
+  if (race.bid && race.bid.stage === "rider") { // variante Échappée : quel coureur tente l'échappée ?
+    $("hand-title").textContent = "Échappée : quel coureur la tente ? (2 cartes misées, 2 cartes Fatigue s'il part)";
+    const row = el("div", { class: "bid-riders" });
+    for (const r of race.bid.riders) {
+      row.append(el("button", { class: "primary", onclick: () => bidRider(r.name) }, `${r.name} · ${r.kind}`));
+    }
+    row.append(el("button", { onclick: () => bidRider(null) }, "Ne pas participer"));
+    hand.append(row);
+  } else if (race.my_turn) {
     $("hand-title").innerHTML = "";
-    $("hand-title").append("À toi : carte de ", riderTag(race.rider.name, race.rider.team),
-      ` (case ${race.rider.position})`);
+    if (race.bid && race.bid.stage === "card") {
+      $("hand-title").append(`Enchère ${race.bid.round} sur 2 pour `, riderTag(race.rider.name, race.rider.team),
+        " : la carte à miser (les autres vont à la défausse)");
+    } else {
+      $("hand-title").append("À toi : carte de ", riderTag(race.rider.name, race.rider.team),
+        ` (case ${race.rider.position})`);
+    }
     for (const card of race.hand) {
       hand.append(el("button", { class: card.fatigue ? "fatigue" : "", onclick: () => playCard(card.index) },
         card.label));
     }
   } else {
     $("hand-title").textContent = state.me.team == null ? "Tu regardes la course (spectateur)." :
-      race.phase === "choose" ? "En attente des autres joueurs…" : "Ta main apparaîtra à ton tour.";
+      race.phase === "choose" || race.phase === "breakaway" ? "En attente des autres joueurs…" :
+      "Ta main apparaîtra à ton tour.";
   }
   $("my-riders").textContent = race.my_riders.map((r) =>
     `${r.name} : case ${r.position} · pioche ${r.draw} · recyclage ${r.recycle} · fatigue ${r.fatigue}`).join("   —   ");
 
   // bouton d'action partagé
   const action = $("action");
-  action.textContent = race.finished ? (race.winner || "Course terminée") : (race.action || "Choix des cartes…");
+  action.textContent = race.finished ? (race.winner || "Course terminée") :
+    (race.action || (race.phase === "breakaway" ? "Enchères de l'échappée…" : "Choix des cartes…"));
   action.disabled = !race.can_act;
   action.onclick = () => advance(race.phase);
 
@@ -613,6 +735,12 @@ async function playCard(index) {
   showError("race-error", null);
   for (const b of $("hand").querySelectorAll("button")) b.disabled = true;
   try { await api("/api/card", { index }); poll(); } catch (e) { showError("race-error", e); poll(); }
+}
+
+async function bidRider(name) {
+  showError("race-error", null);
+  for (const b of $("hand").querySelectorAll("button")) b.disabled = true;
+  try { await api("/api/bid_rider", { rider: name }); poll(); } catch (e) { showError("race-error", e); poll(); }
 }
 
 async function advance(phase) {
@@ -658,9 +786,15 @@ async function start() {
     if (!session.animate && session.anim) { session.anim = null; drawBoard(); }
     paintToggle();
   });
+  setupZoom();
   requestAnimationFrame(frame);
   for (const b of $("camera").querySelectorAll("button")) {
-    b.addEventListener("click", () => { session.camera = b.dataset.camera; session.version = 0; poll(); });
+    b.addEventListener("click", () => {
+      session.camera = b.dataset.camera;
+      session.view = null; // une caméra remplace le cadrage libre
+      session.version = 0;
+      poll();
+    });
   }
   try {
     session.info = await get("/api/info", {});

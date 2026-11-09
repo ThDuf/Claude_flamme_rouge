@@ -51,6 +51,12 @@
             <select id="teams"></select>
           </div>
           <div class="row gap wrap" id="extensions"></div>
+          <div class="row gap wrap hidden" id="breakaway-row">
+            <label class="ext" title="Avant le départ, chaque équipe peut miser deux cartes d'un coureur : le meilleur total part devant (2 cartes Fatigue)">
+              <input type="checkbox" id="breakaway"> Variante Échappée
+            </label>
+            <span class="muted small">enchères avant le départ (tuile Échappée du parcours)</span>
+          </div>
         </div>
         <p id="guest-settings" class="muted"></p>
         <canvas id="preview" width="700" height="300"></canvas>
@@ -73,10 +79,15 @@
     </div>
     <div class="board card">
       <!-- un calque transparent par-dessus chaque dessin : coureurs qui roulent, pluie, vent, soleil -->
-      <div class="layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas></div>
+      <div class="layer" id="map-layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas></div>
       <div class="layer"><canvas id="profile" width="1000" height="100"></canvas><canvas id="profile-fx" class="overlay"></canvas></div>
     </div>
     <div class="row gap wrap tools">
+      <div class="segmented">
+        <button id="zoom-in" title="Zoomer">＋</button>
+        <button id="zoom-out" title="Dézoomer">－</button>
+      </div>
+      <span class="muted small">molette = zoom · glisser = déplacer</span>
       <div class="segmented" id="camera">
         <button data-camera="">Tout le parcours</button>
         <button data-camera="peloton">Zoom peloton</button>

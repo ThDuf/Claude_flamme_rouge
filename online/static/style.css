@@ -58,6 +58,14 @@ button.big { padding: 12px 24px; font-size: 17px; }
 .ext { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border);
        border-radius: 6px; background: var(--panel); cursor: pointer; }
 .ext input { width: auto; }
+#extensions, #breakaway-row { margin-top: 8px; }
+.bid-riders { display: flex; flex-wrap: wrap; gap: 8px; }
+/* choix du coureur de l'échappée : des boutons ordinaires, pas des cartes */
+.cards .bid-riders button { width: auto; height: auto; font-size: 15px; font-weight: 600; padding: 10px 16px;
+                            background: var(--panel); color: var(--text); border: 1px solid var(--border);
+                            border-radius: 6px; transform: none; }
+.cards .bid-riders button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cards .bid-riders button:hover:not(:disabled) { filter: brightness(1.1); border-color: var(--accent); }
 canvas { display: block; width: 100%; height: auto; }
 #preview, #preview-profile { margin-top: 10px; border-radius: 6px; }
 
@@ -67,6 +75,8 @@ canvas { display: block; width: 100%; height: auto; }
 /* la carte et le profil (1000 × 530) tiennent dans la hauteur de l'écran, avec la main en dessous à portée */
 .board { padding: 0; overflow: hidden; max-width: max(640px, calc((100vh - 330px) * 1000 / 530)); margin: 0 auto; }
 .layer { position: relative; }
+#map-layer { cursor: grab; touch-action: none; }
+#map-layer.dragging { cursor: grabbing; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .tools { margin: 10px 0; }
 .segmented { display: flex; gap: 4px; }
