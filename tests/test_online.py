@@ -131,6 +131,65 @@ def test_browser_geometry_matches_the_map_and_movements_are_replayed():
         assert move["from"][0] <= move["to"][0]
 
 
+def test_free_zoom_view_is_drawn_by_the_server():
+    from online.rooms import parse_view
+
+    assert parse_view("") is None and parse_view("abc") is None and parse_view("nan,1,2") is None
+    assert parse_view("999,10,20") == (140.0, 10.0, 20.0) and parse_view("0.5,1,2") == (3.0, 1.0, 2.0)
+    api = Api()
+    code, alice, _bob = lobby_of_two(api)
+    call(api, "/api/start", code=code, token=alice)
+    full = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    scale, cx, cy = full["view"]
+    zoomed = call(api, "/api/state", "GET", code=code, token=alice, view=f"{scale * 3},{cx},{cy}")["race"]
+    assert zoomed["view"][0] == pytest.approx(scale * 3, abs=0.01)
+    assert zoomed["geo"]["scale"] == pytest.approx(scale * 3, abs=0.01)  # animations dans le même cadrage
+    assert zoomed["geo"]["radius"] > full["geo"]["radius"]  # coureurs plus gros quand on zoome
+    bad = call(api, "/api/state", "GET", code=code, token=alice, view="n'importe quoi")["race"]
+    assert bad["view"] == full["view"]  # cadrage illisible : la caméra, sans erreur
+
+
+def test_breakaway_bidding_online():
+    from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
+    from online.rooms import online_choices
+
+    api = Api()
+    code, alice, bob = lobby_of_two(api)
+    plain = call(api, "/api/state", "GET", code=code, token=alice)["lobby"]
+    assert plain["breakaway_available"] is False  # parcours de base, sans Peloton
+    stage = next(c for c in online_choices()
+                 if any(c.track.surface(s) == BREAKAWAY_TILE for s in range(len(c.track))))
+    call(api, "/api/settings", code=code, token=alice, parcours=stage.key, teams=3,
+         seats=["joueur", "joueur", "ia"])
+    lobby = call(api, "/api/state", "GET", code=code, token=bob)["lobby"]
+    assert "peloton" in lobby["extensions"] and lobby["breakaway_available"] and lobby["breakaway"]
+    call(api, "/api/start", code=code, token=alice)
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    assert race["phase"] == "breakaway" and race["title"] == "Enchères de l'échappée"
+    first, other = (alice, bob) if race["bid"] else (bob, alice)
+    with pytest.raises(OnlineError):  # pas son tour d'enchérir
+        call(api, "/api/bid_rider", code=code, token=other, rider=None)
+    mine = call(api, "/api/state", "GET", code=code, token=first)["race"]["bid"]
+    assert mine["stage"] == "rider" and len(mine["riders"]) == 2
+    call(api, "/api/bid_rider", code=code, token=first, rider=mine["riders"][0]["name"])
+    for round_ in (1, 2):  # deux mises
+        race = call(api, "/api/state", "GET", code=code, token=first)["race"]
+        assert race["bid"] == {"stage": "card", "round": round_} and len(race["hand"]) == 4
+        assert call(api, "/api/state", "GET", code=code, token=other)["race"]["hand"] == []  # main cachée
+        call(api, "/api/card", code=code, token=first, index=0)
+    call(api, "/api/bid_rider", code=code, token=other, rider=None)  # l'autre joueur passe
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    assert race["phase"] == "choose"  # l'IA a enchéri seule, l'échappée est résolue, le tour 1 commence
+    texts = " ".join(line["text"] for line in race["log"])
+    assert "tente l'échappée" in texts and "ne participe pas" in texts
+
+    # sans la variante : pas d'enchères
+    code2, host2, _guest2 = lobby_of_two(api)
+    call(api, "/api/settings", code=code2, token=host2, parcours=stage.key, breakaway=False)
+    call(api, "/api/start", code=code2, token=host2)
+    assert call(api, "/api/state", "GET", code=code2, token=host2)["race"]["phase"] == "choose"
+
+
 def test_http_server_serves_the_page_and_the_api():
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(Api()))
     port = httpd.server_address[1]

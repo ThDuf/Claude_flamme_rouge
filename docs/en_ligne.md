@@ -28,7 +28,9 @@ Sans tunnel, `python -m online.server --lan` rend le jeu joignable depuis les ap
   Une place « Joueur » restée libre au départ est jouée par l'IA.
 - Pendant la course, chacun ne voit **que sa main** ; les coureurs choisissent leur carte chacun à leur tour,
   puis n'importe quel joueur lance le mouvement, l'aspiration et la fatigue.
-- Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne).
+- Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
+  boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
+  net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.
 - Recharger la page ramène dans la partie (le navigateur garde ta place). À l'arrivée, l'hôte peut revenir au
   salon pour une revanche.
 
@@ -43,9 +45,13 @@ Sans tunnel, `python -m online.server --lan` rend le jeu joignable depuis les ap
   (l'un après l'autre, du premier au dernier) et l'aspiration ; pluie, vent et soleil animés sur la carte et le
   profil (extension Météo). Elles ne se rejouent pas quand on recharge la page.
 
+- Variante Échappée (extension Peloton, parcours avec une tuile Échappée) : l'hôte la coche dans le salon. Avant
+  le départ, chaque équipe à son tour choisit un coureur (ou passe) et mise deux cartes ; l'IA enchérit seule,
+  les équipes fantômes ne participent pas.
+
 ## Pas encore en ligne
 
-Grand Tour, variante Échappée, éditeur de parcours.
+Grand Tour, éditeur de parcours (les parcours enregistrés sur le PC hôte sont bien proposés dans le salon).
 
 ## Technique
 

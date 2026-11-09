@@ -11,6 +11,7 @@ Chaque changement augmente `version` : un navigateur qui a déjà la version cou
 """
 from __future__ import annotations
 
+import math
 import secrets
 import threading
 import time
@@ -19,11 +20,13 @@ from typing import Optional
 
 from flamme_rouge.animation import moves_between, snapshot
 from flamme_rouge.boardview import (
-    BOARD_W, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, follow_view, map_primitives, podium_primitives, profile_geometry,
+    BOARD_W, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, MAX_SCALE, MIN_SCALE, follow_view, map_primitives, map_transform,
+    podium_primitives, profile_geometry,
     profile_primitives, road_geometry, track_preview_primitives,
 )
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
-from flamme_rouge.controller import CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
+from flamme_rouge.controller import BREAKAWAY, CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
+from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
 from flamme_rouge.extensions import EXTENSIONS, PELOTON
 from flamme_rouge.game import TEAM_MUSCLE, TEAM_PELOTON, TEAM_PLAYER, Game
 
@@ -36,8 +39,10 @@ MAX_ROOMS, MAX_PLAYERS, NAME_MAX = 30, 12, 20
 ROOM_IDLE_SECONDS = 6 * 3600  # un salon sans activité depuis 6 h est oublié
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # sans I ni O (confondus avec 1 et 0)
 LOG_LINES = 80
+MAX_CACHED_VIEWS = 24  # cadrages différents gardés en mémoire pour une même version du salon
 
 PHASE_TITLES = {
+    BREAKAWAY: "Enchères de l'échappée",
     CHOOSE: "Choix des cartes",
     MOVEMENT: "Cartes posées",
     SLIPSTREAM: "Mouvement terminé",
@@ -73,6 +78,20 @@ def online_choices() -> list[Choice]:
     return out
 
 
+def parse_view(text) -> Optional[tuple]:
+    """« échelle,x,y » envoyé par le navigateur -> cadrage borné (échelle entre MIN_SCALE et MAX_SCALE), ou None
+    (cadrage absent ou illisible : on garde la caméra, sans erreur qui renverrait le joueur à l'accueil)."""
+    if not text:
+        return None
+    try:
+        scale, x, y = (float(v) for v in str(text).split(","))
+    except ValueError:
+        return None
+    if not all(math.isfinite(v) for v in (scale, x, y)) or abs(x) > 1e5 or abs(y) > 1e5 or scale <= 0:
+        return None
+    return round(min(max(scale, MIN_SCALE), MAX_SCALE), 2), round(x, 2), round(y, 2)
+
+
 def clean_name(name) -> str:
     name = " ".join(str(name or "").split())[:NAME_MAX]
     if not name:
@@ -90,6 +109,7 @@ class Room:
     teams: int = 2
     extensions: set = field(default_factory=set)
     seats: list[str] = field(default_factory=lambda: [SEAT_PLAYER] * len(TEAM_COLORS))
+    breakaway: bool = True  # variante Échappée (seulement avec Peloton et une tuile Échappée sur le parcours)
     game: Optional[Game] = None
     ctl: Optional[TurnController] = None
     ai_teams: frozenset = frozenset()
@@ -175,10 +195,18 @@ class Room:
         player.team = team
         self.bump()
 
-    def configure(self, player: Player, parcours=None, teams=None, extensions=None, seats=None) -> None:
+    def breakaway_available(self) -> bool:
+        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours."""
+        track = self.choice().track
+        return PELOTON in self.extensions and any(track.surface(s) == BREAKAWAY_TILE for s in range(len(track)))
+
+    def configure(self, player: Player, parcours=None, teams=None, extensions=None, seats=None,
+                  breakaway=None) -> None:
         """L'hôte règle la partie ; les places devenues injouables sont libérées."""
         self._require_host(player)
         self._require_lobby()
+        if breakaway is not None:
+            self.breakaway = bool(breakaway)
         if parcours is not None:
             choice = self.choice(str(parcours))
             self.parcours = choice.key
@@ -218,7 +246,7 @@ class Room:
                          team_types=team_types)
         self.ai_teams = frozenset(t for t in range(self.teams)
                                   if team_types[t] == TEAM_PLAYER and self.owner(t) is None)
-        self.ctl = TurnController(self.game, self.ai_teams)
+        self.ctl = TurnController(self.game, self.ai_teams, self.breakaway and self.breakaway_available())
         self.bump()
 
     def back_to_lobby(self, player: Player) -> None:
@@ -228,10 +256,24 @@ class Room:
 
     # ------------------------------------------------------------------ course
 
+    def bid_rider(self, player: Player, name: Optional[str]) -> None:
+        """Variante Échappée : l'équipe dont c'est le tour choisit le coureur qui tente l'échappée, ou passe."""
+        ctl = self._running()
+        if ctl.phase != BREAKAWAY or ctl.bid_team != player.team or ctl.bid_rider is not None:
+            raise OnlineError("Ce n'est pas à toi de choisir pour l'échappée.")
+        rider = None
+        if name is not None:
+            rider = next((r for r in self.game.riders if r.team == player.team and r.name == name), None)
+            if rider is None:
+                raise OnlineError("Ce coureur n'est pas dans ton équipe.")
+        ctl.choose_bid_rider(rider)
+        self.bump()
+
     def play_card(self, player: Player, index: int) -> None:
+        """Une carte : pour le coureur qui choisit (tour normal), ou la mise de l'échappée."""
         ctl = self._running()
         rider = ctl.current_rider
-        if ctl.phase != CHOOSE or rider is None or rider.team != player.team:
+        if ctl.phase not in (CHOOSE, BREAKAWAY) or rider is None or rider.team != player.team:
             raise OnlineError("Ce n'est pas à toi de choisir.")
         if not 0 <= int(index) < len(ctl.hand):
             raise OnlineError("Carte inconnue.")
@@ -266,7 +308,7 @@ class Room:
 
     # ------------------------------------------------------------------ état envoyé au navigateur
 
-    def state(self, player: Player, camera: str = "") -> dict:
+    def state(self, player: Player, camera: str = "", view: Optional[tuple] = None) -> dict:
         self.touched = time.monotonic()
         base = {
             "version": self.version,
@@ -277,7 +319,7 @@ class Room:
         if self.game is None:
             base["lobby"] = self._lobby_state()
         else:
-            base["race"] = self._race_state(player, camera)
+            base["race"] = self._race_state(player, camera, view)
         return base
 
     def _lobby_state(self) -> dict:
@@ -298,18 +340,25 @@ class Room:
             "details": choice.details,
             "teams": self.teams,
             "extensions": sorted(self.extensions),
+            "breakaway": self.breakaway,
+            "breakaway_available": self.breakaway_available(),
             "seats": seats,
             "preview": self._cache["preview"],
             "preview_size": [PREVIEW_W, PREVIEW_H, PREVIEW_PROFILE_H],
         }
 
-    def _race_state(self, player: Player, camera: str) -> dict:
+    def _race_state(self, player: Player, camera: str, view: Optional[tuple] = None) -> dict:
+        """`view` : cadrage libre (échelle, x, y) choisi à la souris dans le navigateur ; sinon la caméra."""
         g, ctl = self.game, self.ctl
         rider = ctl.current_rider
-        key = ("race", camera)
-        if key not in self._cache:  # la même image pour tout le monde (seule la caméra change)
-            view = follow_view(g, camera) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
+        key = ("race", view) if view is not None else ("race", camera)
+        if key not in self._cache:  # la même image pour tous ceux qui ont le même cadrage
+            if len(self._cache) > MAX_CACHED_VIEWS:  # beaucoup de zooms différents : on repart de zéro
+                self._cache.clear()
+            if view is None:
+                view = follow_view(g, camera) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
             shared = {
+                "view": list(view or map_transform(g)),  # le cadrage utilisé : point de départ des zooms
                 "map": map_primitives(g, rider, view=view),
                 "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather),
                 # pour les animations du navigateur : la route sans coureurs, sa géométrie, celle du profil
@@ -327,8 +376,26 @@ class Room:
                 shared["podium"] = podium_primitives(g, BOARD_W, MAP_H, 8.0, names)
             self._cache[key] = shared
         shared = self._cache[key]
-        my_turn = ctl.phase == CHOOSE and rider is not None and rider.team == player.team
-        if ctl.phase == CHOOSE and rider is not None:
+        my_turn = ctl.phase in (CHOOSE, BREAKAWAY) and rider is not None and rider.team == player.team
+        bid = None  # variante Échappée : ce que voit l'équipe qui enchérit
+        if ctl.phase == BREAKAWAY:
+            team = ctl.bid_team
+            owner = self.owner(team) if team is not None else None
+            if rider is None and team is not None:  # l'équipe choisit son coureur, ou passe
+                mine_now = team == player.team
+                waiting = ("À toi : quel coureur tente l'échappée ?" if mine_now
+                           else f"Échappée : {self.team_label(team)} choisit son coureur…")
+                if mine_now:
+                    bid = {"stage": "rider", "riders": [{"name": r.name, "team": r.team, "kind": r.kind}
+                                                        for r in g.riders if r.team == team]}
+            elif rider is not None:
+                waiting = (f"À toi : enchère {ctl.bid_round} sur 2 pour {rider.name}" if my_turn else
+                           f"Échappée : {rider.name} — {owner.name if owner else 'IA'} mise une carte…")
+                if my_turn:
+                    bid = {"stage": "card", "round": ctl.bid_round}
+            else:
+                waiting = ""
+        elif ctl.phase == CHOOSE and rider is not None:
             who = self.owner(rider.team)
             waiting = ("À toi : choisis la carte de " + rider.name) if my_turn else \
                 f"{rider.name} — {who.name if who else 'IA'} choisit sa carte…"
@@ -345,6 +412,7 @@ class Room:
             "action": ACTION_TEXT.get(ctl.phase, ""),
             "can_act": ctl.phase in ACTION_TEXT and player.team is not None,
             "my_turn": my_turn,
+            "bid": bid,
             "rider": {"name": rider.name, "team": rider.team, "position": rider.position} if rider else None,
             "hand": [{"index": i, "label": str(c), "fatigue": c.exhaustion} for i, c in enumerate(ctl.hand)]
             if my_turn else [],
