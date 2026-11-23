@@ -1,0 +1,12 @@
+# Déploiement sur Render (offre gratuite) : voir docs/en_ligne.md, « Héberger sur Render ».
+services:
+  - type: web
+    name: flamme-rouge
+    runtime: python
+    plan: free
+    buildCommand: python --version   # rien à installer : bibliothèque standard seulement
+    startCommand: python -m online.server
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"

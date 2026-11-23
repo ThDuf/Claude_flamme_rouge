@@ -20,6 +20,25 @@ serveur tournent.
 Sans tunnel, `python -m online.server --lan` rend le jeu joignable depuis les appareils du réseau local
 (`http://<adresse-du-PC>:8770`).
 
+## Héberger sur Render (gratuit, sans le PC)
+
+Le site tourne alors chez Render, à une adresse fixe (`https://flamme-rouge-xxxx.onrender.com`) : n'importe qui
+peut créer ou rejoindre une partie depuis un ordinateur ou un téléphone, sans que ton PC soit allumé. Le fichier
+`render.yaml` décrit le service ; le serveur prend le port donné par Render (variable `PORT`) et écoute alors
+pour tout Internet.
+
+1. Créer un compte sur render.com (gratuit, sans carte) en se connectant avec GitHub.
+2. **New** → **Blueprint**, choisir le dépôt `Claude_flamme_rouge` et la branche à déployer, puis **Apply**.
+   Render lit `render.yaml` et crée le service web `flamme-rouge` (offre Free).
+3. Au bout d'une minute ou deux, l'adresse du site apparaît en haut de la page du service : c'est le lien à
+   ouvrir sur le téléphone et à envoyer.
+4. Chaque push sur la branche choisie redéploie le site (les parties en cours sont alors perdues).
+
+Limites de l'offre gratuite : sans visite pendant ~15 minutes, le serveur s'endort ; la visite suivante le
+réveille en ~30 secondes à 1 minute. Pendant une partie, les navigateurs interrogent le serveur deux fois par
+seconde, donc il reste éveillé. S'il s'endort ou redémarre, les salons sont perdus (ils ne vivent qu'en
+mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas proposés sur Render.
+
 ## Une partie
 
 - **Créer une partie** : tu deviens l'hôte. Envoie le lien du salon (il contient le code à 4 lettres) ou le code.

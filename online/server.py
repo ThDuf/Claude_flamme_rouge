@@ -2,6 +2,7 @@
 
     python -m online.server            # http://127.0.0.1:8770 (seulement ce PC ; le tunnel s'y branche)
     python -m online.server --lan      # aussi depuis les autres appareils du réseau local
+    PORT=10000 python -m online.server # hébergé (Render…) : écoute sur ce port, pour tout Internet
 
 Les navigateurs demandent l'état du salon environ deux fois par seconde (`/api/state?since=version` : rien
 n'est renvoyé si rien n'a changé). Voir docs/en_ligne.md.
@@ -192,10 +193,15 @@ def serve(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serveur des parties à distance de Flamme Rouge")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--lan", action="store_true", help="accepte aussi les appareils du réseau local")
     args = parser.parse_args()
-    serve("0.0.0.0" if args.lan else "127.0.0.1", args.port)
+    # Hébergeur (Render…) : il fournit le port dans PORT et joint le serveur de l'extérieur du conteneur.
+    hosted_port = os.environ.get("PORT")
+    if hosted_port and args.port is None:
+        serve("0.0.0.0", int(hosted_port))
+    else:
+        serve("0.0.0.0" if args.lan else "127.0.0.1", args.port or DEFAULT_PORT)
 
 
 if __name__ == "__main__":
