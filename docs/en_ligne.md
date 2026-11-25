@@ -1,29 +1,12 @@
 # Jouer à distance
 
-Le jeu tourne sur ton PC : un petit serveur Python (bibliothèque standard, rien à installer) sert une page web
-et garde l'état des parties. Tes amis jouent depuis leur navigateur. Le site n'existe que tant que ton PC et le
-serveur tournent.
+Le jeu en ligne est hébergé sur **Render** : un petit serveur Python (bibliothèque standard, rien à installer)
+sert une page web et garde l'état des parties. Tout le monde joue depuis son navigateur, ordinateur ou
+téléphone, à une adresse fixe, sans que ton PC soit allumé.
 
-## Lancer
+## Héberger sur Render (gratuit)
 
-1. Une seule fois, installer le tunnel Cloudflare (gratuit, sans compte) :
-
-   ```
-   winget install --id Cloudflare.cloudflared
-   ```
-
-2. Double-cliquer sur `lancer_en_ligne.bat`. Il démarre le serveur, puis le tunnel, et affiche une adresse
-   `https://….trycloudflare.com` : c'est le lien à envoyer. Elle change à chaque lancement.
-3. Toi, tu joues sur `http://127.0.0.1:8770`.
-4. Pour arrêter : fermer la fenêtre du tunnel (ou Ctrl+C).
-
-Sans tunnel, `python -m online.server --lan` rend le jeu joignable depuis les appareils du réseau local
-(`http://<adresse-du-PC>:8770`).
-
-## Héberger sur Render (gratuit, sans le PC)
-
-Le site tourne alors chez Render, à une adresse fixe (`https://flamme-rouge-xxxx.onrender.com`) : n'importe qui
-peut créer ou rejoindre une partie depuis un ordinateur ou un téléphone, sans que ton PC soit allumé. Le fichier
+Le site tourne chez Render, à une adresse fixe (`https://flamme-rouge-xxxx.onrender.com`). Le fichier
 `render.yaml` décrit le service ; le serveur prend le port donné par Render (variable `PORT`) et écoute alors
 pour tout Internet.
 
@@ -38,6 +21,9 @@ Limites de l'offre gratuite : sans visite pendant ~15 minutes, le serveur s'endo
 réveille en ~30 secondes à 1 minute. Pendant une partie, les navigateurs interrogent le serveur deux fois par
 seconde, donc il reste éveillé. S'il s'endort ou redémarre, les salons sont perdus (ils ne vivent qu'en
 mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas proposés sur Render.
+
+Pour essayer une modification sur ton PC avant de la pousser : `python -m online.server`, puis
+`http://127.0.0.1:8770` (le serveur n'écoute alors que ce PC).
 
 ## Une partie
 
@@ -63,9 +49,9 @@ mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas prop
 
 ## Sécurité
 
-- Le serveur n'écoute que sur ton PC (`127.0.0.1`) ; le tunnel Cloudflare s'y branche. Ton adresse IP n'est pas
-  montrée et aucun port n'est ouvert sur ta box.
-- Il ne sert que trois fichiers (`online/static`) et l'API du jeu : aucun accès à tes dossiers.
+- Le serveur tourne chez Render, pas sur ton PC : ton adresse IP n'est pas montrée et aucun port n'est ouvert
+  sur ta box.
+- Il ne sert que trois fichiers (`online/static`) et l'API du jeu : aucun accès au reste du dépôt.
 - Toute personne qui a le lien peut ouvrir la page ; pour entrer dans une partie, il faut son code.
 
 - Animations (bouton « Animations », réglage de chaque navigateur) : les coureurs roulent pendant le mouvement
@@ -78,7 +64,7 @@ mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas prop
 
 ## Pas encore en ligne
 
-Grand Tour, éditeur de parcours (les parcours enregistrés sur le PC hôte sont bien proposés dans le salon).
+Grand Tour, éditeur de parcours, vue 3D.
 
 ## Technique
 
