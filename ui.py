@@ -126,14 +126,18 @@ class PlayingCard(tk.Frame):
 
     W, H = 64, 88
 
-    def __init__(self, parent, text: str, command, fatigue: bool = False, caption: str = ""):
+    def __init__(self, parent, text: str, command, fatigue: bool = False, caption: str = "", selected: bool = False,
+                 scale: float = 1.0):
+        """`selected` : la carte choisie (bord rouge épais, même sans survol) ; `scale` : taille (1 = 64 × 88)."""
         face = CARD_FATIGUE if fatigue else CARD_FACE
-        super().__init__(parent, width=self.W, height=self.H, bg=face, highlightthickness=3,
-                         highlightbackground=face, highlightcolor=face, cursor="hand2")
+        ring = pal.ACCENT if selected else face
+        super().__init__(parent, width=round(self.W * scale), height=round(self.H * scale), bg=face,
+                         highlightthickness=4 if selected else 3, highlightbackground=ring, highlightcolor=ring,
+                         cursor="hand2")
         self.pack_propagate(False)
-        self._face, self._command = face, command
-        number = tk.Label(self, text=text, font=font(26 if len(text) <= 2 else 15, True), bg=face, fg=CARD_INK,
-                          cursor="hand2")
+        self._face, self._command = ring, command
+        size = round((26 if len(text) <= 2 else 15) * scale)
+        number = tk.Label(self, text=text, font=font(size, True), bg=face, fg=CARD_INK, cursor="hand2")
         number.pack(expand=True)
         widgets = [self, number]
         if caption:

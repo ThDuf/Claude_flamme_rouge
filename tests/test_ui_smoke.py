@@ -61,8 +61,17 @@ def test_menu_then_a_whole_game_then_back(root):
     app.set_camera()
     turns = 0
     while app.ctl.phase != FINISHED and turns < 100:
-        while app.ctl.phase == CHOOSE:
-            app.on_card(app.ctl.hand[0])
+        while app.ctl.phase == CHOOSE:  # choix simultané : une carte par coureur de l'équipe, puis valider
+            riders = app.choosing_riders()
+            assert riders and len({r.team for r in riders}) == 1
+            app.validate()  # rien n'est choisi : rien ne se passe
+            assert app.ctl.phase == CHOOSE and app.choosing_riders() == riders
+            for rider in riders:
+                hand = app.ctl.hands[rider]
+                app.pick(rider, hand[-1])
+                app.pick(rider, hand[0])  # on peut changer d'avis
+                assert app.picks[rider] is hand[0]
+            app.validate()
         for _ in range(3):
             app.on_action()
             app.skip_animation()

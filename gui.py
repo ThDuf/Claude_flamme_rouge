@@ -36,7 +36,7 @@ from flamme_rouge.controller import (
     SLIPSTREAM,
     TurnController,
 )
-from flamme_rouge.decks import deck_summary, deck_text, whole_deck
+from flamme_rouge.decks import deck_summary, whole_deck
 from flamme_rouge.game import TEAM_PLAYER
 from flamme_rouge.tiles import load_track_file
 
@@ -50,7 +50,7 @@ PHASE_TITLES = {
 }
 PHASE_INFO = {
     BREAKAWAY: "Chaque équipe mise deux cartes d'un coureur, ou passe : le meilleur total part devant.",
-    CHOOSE: "Chaque coureur choisit une carte parmi 4. Le coureur entouré d'un halo doré est en train de choisir.",
+    CHOOSE: "Chaque équipe choisit en même temps une carte pour son rouleur et une pour son sprinteur, puis valide.",
     MOVEMENT: "Toutes les cartes sont posées. Clique sur le bouton pour les révéler et lancer le mouvement.",
     SLIPSTREAM: "Regarde le plateau, puis lance l'aspiration.",
     EXHAUSTION: "Regarde le plateau, puis passe à la fatigue.",
@@ -73,6 +73,7 @@ PANEL_PER_ROW = 4  # pastilles par ligne dans ce panneau
 SIDE_PANEL_W = 330  # ce panneau quand il est à droite de la carte (écran large)
 ROTATE_STEP = 30  # degrés : un clic sur ⟲ ou ⟳ en vue 3D
 DECK_PANEL_W, DECK_TAB_W, DECK_PER_ROW = 330, 34, 5  # panneau « Deck de départ » sur le bord droit
+HAND_CARD_SCALE = 0.72  # cartes de la main plus petites : deux mains (rouleur et sprinteur) l'une sous l'autre
 CAMERA_ALL = "tout"
 CAMERA_CHOICES = [(CAMERA_ALL, "Tout le parcours"), (FOLLOW_PELOTON, "Zoom peloton"), (FOLLOW_HEAD, "Zoom tête de course")]
 
@@ -90,12 +91,13 @@ class App:
         self.on_stage_end = on_stage_end
         if stage_title:
             self.root.title(f"Flamme Rouge — {stage_title}")
-        self.ctl = TurnController(self.game, ai_teams, breakaway)  # `ai_teams` : jouées par l'IA
+        # `ai_teams` : jouées par l'IA. Choix simultané : chaque joueur choisit les cartes de ses deux coureurs ensemble
+        self.ctl = TurnController(self.game, ai_teams, breakaway, simultaneous=True)
+        self.picks: dict = {}  # carte choisie (pas encore validée) pour chaque coureur de l'équipe qui choisit
         self.on_menu = on_menu  # fonction qui ramène au menu (None : pas de bouton)
         self.secret_var = tk.BooleanVar(value=secret)
         self.animate_var = tk.BooleanVar(value=animate)
         self.revealed = False  # en mode secret : la main est-elle affichée ?
-        self.deck_win = None  # fenêtre des decks, quand elle est ouverte
         self.anim = None  # animation en cours (animation.Animation) ou None
         self.anim_start = 0.0
         self.anim_job = None
@@ -120,10 +122,12 @@ class App:
     # --------------------------------------------------------------- construction
 
     def _build(self) -> None:
-        root = self.parent
         ui.init(self.root)
         ui.place_window(self.root, WINDOW_W, WINDOW_H)
-        root.configure(bg=pal.BG)
+        self.parent.configure(bg=pal.BG)
+        # tout l'écran de jeu, à gauche ; le panneau « Deck de départ » se range à sa droite et le pousse
+        self.content = root = tk.Frame(self.parent, bg=pal.BG)
+        root.pack(side="left", fill="both", expand=True)
 
         # ----- bandeau : numéro de tour, phase, consigne, boutons
         top = tk.Frame(root, bg=pal.PANEL)
@@ -141,9 +145,8 @@ class App:
         self.info_label.pack(anchor="w", pady=(4, 0))
         tools = tk.Frame(top, bg=pal.PANEL)
         tools.pack(side="right", padx=18)
-        ui.FlatButton(tools, "Decks des coureurs", self.on_decks, size=10, style="secondary").pack(side="left")
         if self.on_menu is not None:
-            ui.FlatButton(tools, "⟵  Menu", self.on_back, size=10, style="ghost").pack(side="left", padx=(8, 0))
+            ui.FlatButton(tools, "⟵  Menu", self.on_back, size=10, style="ghost").pack(side="left")
         tk.Frame(root, bg=pal.ACCENT, height=2).pack(fill="x")
 
         # ----- la carte
@@ -230,11 +233,50 @@ class App:
         return self.secret_var.get() is True
 
     def on_card(self, card) -> None:
+        """Variante Échappée : la carte misée par le coureur qui tente l'échappée."""
         self.ctl.choose(card)
-        # Le prochain rouleur est le premier coureur d'une autre équipe : on recache la main.
-        nxt = self.ctl.current_rider
-        if nxt is None or nxt.kind == ROULEUR:
+        if self.ctl.current_rider is None:  # l'équipe a fini d'enchérir : on recache la main
             self.revealed = False
+        self.refresh()
+
+    # choix simultané : l'équipe qui choisit voit les mains de ses deux coureurs, en touche une carte dans chacune
+    # (on peut changer d'avis), puis valide ; l'équipe suivante prend la main.
+
+    def choosing_team(self):
+        """L'équipe dont c'est le tour de choisir (la plus petite parmi celles qui ont encore des mains), ou None."""
+        if self.ctl.phase != CHOOSE or not self.ctl.hands:
+            return None
+        return min(r.team for r in self.ctl.hands)
+
+    def choosing_riders(self) -> list:
+        team = self.choosing_team()
+        return [r for r in self.game.riders if r in self.ctl.hands and r.team == team]
+
+    def focus_rider(self):
+        """Le coureur à mettre en avant (halo doré) : celui qui mise pour l'échappée, ou le premier coureur de l'équipe
+        qui choisit dont la carte n'est pas encore choisie."""
+        if self.ctl.current_rider is not None:
+            return self.ctl.current_rider
+        riders = self.choosing_riders()
+        return next((r for r in riders if r not in self.picks), riders[0] if riders else None)
+
+    def pick(self, rider, card) -> None:
+        """Touche une carte pour ce coureur (sans la poser) ; un autre clic change d'avis."""
+        if rider not in self.ctl.hands or card not in self.ctl.hands[rider]:
+            return
+        self.picks[rider] = card
+        self._show_hand()
+        self._paint_map()
+        self._update_action()
+
+    def validate(self) -> None:
+        """Pose les cartes choisies de l'équipe qui choisit ; quand tout le monde a posé, place au mouvement."""
+        riders = self.choosing_riders()
+        if not riders or any(r not in self.picks for r in riders):
+            return
+        for rider in riders:
+            self.ctl.choose_for(rider, self.picks.pop(rider))
+        self.revealed = False  # en mode secret, l'équipe suivante doit dire qu'elle est prête
         self.refresh()
 
     def _bid_rider(self, rider) -> None:
@@ -246,6 +288,9 @@ class App:
         if self.anim is not None:
             return
         phase = self.ctl.phase
+        if phase == CHOOSE:  # choix simultané : le bouton valide les cartes de l'équipe qui choisit
+            self.validate()
+            return
         if phase == FINISHED and self.on_stage_end is not None:  # Grand Tour : écran des résultats de l'étape
             self.close()
             self.on_stage_end()
@@ -253,6 +298,7 @@ class App:
         before = snapshot(self.game.riders)
         self.ctl.advance()
         self.revealed = False
+        self.picks = {}
         moves = moves_between(before, self.game.riders)
         if moves and phase in (MOVEMENT, SLIPSTREAM) and self.animate_var.get() is True:
             self.anim = movement_animation(moves) if phase == MOVEMENT else slipstream_animation(moves)
@@ -428,44 +474,66 @@ class App:
         if self.anim_job is not None:
             self.root.after_cancel(self.anim_job)
             self.anim_job = None
-        self._close_decks()
-
-    # ---------------------------------------------------------- fenêtre des decks
+        if self.deck_open:  # la fenêtre reprend sa largeur pour l'écran suivant
+            try:
+                self.set_deck_open(False)
+            except tk.TclError:
+                pass
 
     # ------------------------------------------------------------ deck de départ (bord droit)
 
     def _build_deck_panel(self) -> None:
-        """Onglet « Deck » sur le bord droit de la fenêtre, et le panneau qu'il ouvre : le deck de départ des coureurs
-        de l'équipe qui joue, une petite carte par valeur avec le nombre d'exemplaires dessous (comme en ligne)."""
-        panel = self.deck_panel = tk.Frame(self.parent, bg=pal.PANEL, highlightthickness=3,
+        """Onglet « Deck » au bord droit de l'écran de jeu, et le panneau qu'il ouvre à sa droite (il pousse l'écran,
+        sans le recouvrir) : le deck de départ des coureurs de l'équipe qui joue, une petite carte par valeur avec le
+        nombre d'exemplaires dessous (comme en ligne)."""
+        panel = self.deck_panel = tk.Frame(self.parent, bg=pal.PANEL, width=DECK_PANEL_W, highlightthickness=3,
                                            highlightbackground=pal.ACCENT, highlightcolor=pal.ACCENT)
+        panel.pack_propagate(False)  # largeur fixe : c'est l'écran de jeu qui se pousse
         head = tk.Frame(panel, bg=pal.PANEL)
-        head.pack(fill="x", padx=(16, DECK_TAB_W + 10), pady=(14, 4))
+        head.pack(fill="x", padx=16, pady=(14, 4))
         tk.Label(head, text="Deck de départ", font=ui.font(15, True), bg=pal.PANEL, fg=pal.TEXT).pack(side="left")
         ui.FlatButton(head, "✕", lambda: self.set_deck_open(False), size=10, style="ghost", padx=8, pady=2).pack(
             side="right")
         self.deck_body = tk.Frame(panel, bg=pal.PANEL)
-        self.deck_body.pack(fill="both", expand=True, padx=(16, DECK_TAB_W + 10))
-        tab = self.deck_tab = tk.Label(self.parent, text="🂠\n\nD\nE\nC\nK", font=ui.font(10, True), bg=pal.CARD_HI,
+        self.deck_body.pack(fill="both", expand=True, padx=16)
+        # l'onglet, sur le bord droit de l'écran de jeu : contre le panneau quand il est ouvert
+        tab = self.deck_tab = tk.Label(self.content, text="🂠\n\nD\nE\nC\nK", font=ui.font(10, True), bg=pal.CARD_HI,
                                        fg=pal.TEXT, padx=7, pady=12, cursor="hand2", justify="center",
                                        highlightthickness=1, highlightbackground=pal.BORDER)
         tab.place(relx=1.0, rely=0.5, anchor="e")
         tab.bind("<ButtonRelease-1>", lambda _e: self.set_deck_open(not self.deck_open))
         ui.Tooltip(tab, "Voir ou cacher le deck de départ des coureurs de l'équipe qui joue")
+        self._width_before_deck = None
 
     def set_deck_open(self, open_: bool) -> None:
+        """Ouvre ou ferme le panneau. Il se range à droite de l'écran de jeu et le pousse : la fenêtre s'élargit
+        d'autant si l'écran le permet (sinon c'est l'écran de jeu qui se resserre), et reprend sa largeur à la
+        fermeture. Une fenêtre agrandie (plein écran) ne change pas de taille."""
+        if open_ == self.deck_open:
+            return
         self.deck_open = open_
+        win = self.root
+        win.update_idletasks()
+        zoomed = win.state() == "zoomed"
         if open_:
-            self.deck_panel.place(relx=1.0, rely=0.0, relheight=1.0, anchor="ne", width=DECK_PANEL_W)
+            if not zoomed:
+                self._width_before_deck = win.winfo_width()
+                wanted = min(self._width_before_deck + DECK_PANEL_W, win.winfo_screenwidth() - 20)
+                x = max(0, min(win.winfo_x(), win.winfo_screenwidth() - wanted - 10))
+                win.geometry(f"{wanted}x{win.winfo_height()}+{x}+{win.winfo_y()}")
+            self.deck_panel.pack(side="right", fill="y", before=self.content)
             self._show_deck_panel()
         else:
-            self.deck_panel.place_forget()
+            self.deck_panel.pack_forget()
+            if not zoomed and self._width_before_deck:
+                win.geometry(f"{self._width_before_deck}x{win.winfo_height()}+{win.winfo_x()}+{win.winfo_y()}")
+            self._width_before_deck = None
         self.deck_tab.configure(bg=pal.ACCENT if open_ else pal.CARD_HI, fg="#ffffff" if open_ else pal.TEXT)
-        self.deck_tab.lift()  # l'onglet reste au-dessus du panneau, pour le refermer
+        self.deck_tab.lift()
 
     def _deck_team(self) -> int:
-        """L'équipe dont on montre le deck : celle du coureur qui choisit, sinon la première équipe d'un joueur."""
-        rider = self.ctl.current_rider
+        """L'équipe dont on montre le deck : celle qui choisit, sinon la première équipe d'un joueur."""
+        rider = self.focus_rider()
         if rider is not None:
             return rider.team
         humans = [t for t in range(len(self.game.team_types))
@@ -504,58 +572,6 @@ class App:
                  bg=pal.PANEL, fg=pal.FAINT, anchor="w", justify="left", wraplength=DECK_PANEL_W - DECK_TAB_W - 40).pack(
             fill="x", pady=(10, 0))
 
-    def on_decks(self) -> None:
-        """Ouvre (ou ramène au premier plan) la fenêtre qui montre le contenu des decks."""
-        if self.deck_win is not None and self.deck_win.winfo_exists():
-            self.deck_win.lift()
-            self._refresh_decks()
-            return
-        win = tk.Toplevel(self.root)
-        win.title("Decks des coureurs")
-        win.configure(bg=pal.BG)
-        win.protocol("WM_DELETE_WINDOW", self._close_decks)
-        self.deck_win = win
-        tk.Label(
-            win,
-            text="Pioche = cartes pas encore tirées · Recyclage = cartes écartées, remélangées quand la pioche est vide · "
-            "Jouées = retirées du jeu · F = fatigue",
-            font=ui.font(9),
-            bg=pal.BG,
-            fg=pal.MUTED,
-            wraplength=620,
-            justify="left",
-        ).pack(anchor="w", padx=12, pady=(12, 0))
-        frame = tk.Frame(win, bg=pal.BG)
-        frame.pack(fill="both", expand=True, padx=12, pady=12)
-        mono = ("Courier New", 10)
-        self.deck_view = tk.Text(frame, width=72, height=34, wrap="none", state="disabled", font=mono)
-        ui.style_text(self.deck_view)
-        scrollbar = tk.Scrollbar(frame, orient="vertical", command=self.deck_view.yview)
-        self.deck_view.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.deck_view.pack(side="left", fill="both", expand=True)
-        for team, color in enumerate(pal.TEAM_TEXT):
-            self.deck_view.tag_configure(f"team{team}", foreground=color, font=("Courier New", 10, "bold"))
-        self._refresh_decks()
-
-    def _close_decks(self) -> None:
-        if self.deck_win is not None:
-            self.deck_win.destroy()
-        self.deck_win = None
-
-    def _refresh_decks(self) -> None:
-        if self.deck_win is None or not self.deck_win.winfo_exists():
-            return
-        view = self.deck_view.yview()[0]  # garde la position de défilement
-        self.deck_view.configure(state="normal")
-        self.deck_view.delete("1.0", "end")
-        for rider in self.game.riders:
-            first, _, rest = deck_text(rider).partition("\n")
-            self.deck_view.insert("end", first + "\n", f"team{rider.team}")
-            self.deck_view.insert("end", rest + "\n\n")
-        self.deck_view.configure(state="disabled")
-        self.deck_view.yview_moveto(view)
-
     # ------------------------------------------------------------------ affichage
 
     def refresh(self) -> None:
@@ -576,14 +592,27 @@ class App:
         self._show_revealed_cards()
 
         self._show_hand()
-        self._refresh_decks()
         self._show_deck_panel()
+        self._update_action()
+        self._flush_log()
+
+    def _update_action(self) -> None:
+        """Le grand bouton d'action : mouvement / aspiration / fatigue, résultats d'étape, ou, pendant le choix des
+        cartes, « Valider les cartes » de l'équipe qui choisit (actif quand chaque coureur a sa carte)."""
+        phase = self.ctl.phase
         tour_end = phase == FINISHED and self.on_stage_end is not None
+        if phase == CHOOSE and self.choosing_riders():
+            riders = self.choosing_riders()
+            missing = [r.name for r in riders if r not in self.picks]
+            hidden = self._secret() and not self.revealed
+            text = (f"✓ Valider les cartes de l'équipe {riders[0].team + 1}" if not missing
+                    else "Choisis une carte pour " + " et ".join(missing) + "…")
+            self.action_btn.config(text=text, state="normal" if not missing and not hidden else "disabled")
+            return
         self.action_btn.config(
             text="▶ Résultats de l'étape et classements" if tour_end else ACTION_TEXT[phase],
             state="normal" if (phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION) or tour_end) and self.anim is None else "disabled",
         )
-        self._flush_log()
 
     def _paint_map(self) -> None:
         """Dessine la carte (parcours entier, ou cadrage manuel) ; coureurs en mouvement s'il y a une animation.
@@ -598,7 +627,7 @@ class App:
         self._follow_camera()
         shapes = map_primitives(
             self.game,
-            self.ctl.current_rider,
+            self.focus_rider(),
             positions=positions,
             view=self.view,
             proj=self._proj(),
@@ -806,6 +835,9 @@ class App:
                               style="primary", size=11).pack(side="left", padx=(0, 6))
             ui.FlatButton(row, "Ne pas participer", lambda: self._bid_rider(None), size=11, style="ghost").pack(side="left")
             return
+        if self.ctl.phase == CHOOSE:
+            self._show_team_hands(frame)
+            return
         if rider is None:
             tk.Label(frame, text="Les cartes sont posées.", font=ui.font(12), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w")
             return
@@ -841,6 +873,48 @@ class App:
             frame, text=f"Pioche : {len(rider.draw_pile)} cartes   ·   Recyclage : {len(rider.recycle)} cartes",
             font=ui.font(10), bg=pal.CARD, fg=pal.MUTED,
         ).pack(anchor="w", pady=(10, 0))
+
+    def _show_team_hands(self, frame) -> None:
+        """Choix simultané : les mains des deux coureurs de l'équipe qui choisit, une carte à toucher dans chacune,
+        puis « Valider mes cartes »."""
+        riders = self.choosing_riders()
+        if not riders:
+            tk.Label(frame, text="Les cartes sont posées.", font=ui.font(12), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w")
+            return
+        team = riders[0].team
+        head = tk.Frame(frame, bg=pal.CARD)
+        head.pack(anchor="w", fill="x")
+        tk.Label(head, text=f"Équipe {team + 1}", font=ui.font(12, True), bg=pal.TEAM_FILL[team],
+                 fg=pal.LABEL_ON_FILL[team], padx=9, pady=3).pack(side="left")
+        tk.Label(head, text="une carte pour chaque coureur", font=ui.font(11, True), bg=pal.CARD,
+                 fg=pal.TEAM_TEXT[team]).pack(side="left", padx=10)
+        if self._secret() and not self.revealed:
+            tk.Label(frame, text="Les autres équipes ne regardent pas !", font=ui.font(11), bg=pal.CARD,
+                     fg=pal.MUTED).pack(anchor="w", pady=(10, 8))
+            ui.FlatButton(frame, f"Équipe {team + 1} prête : afficher mes mains", self._reveal, style="primary",
+                          size=11).pack(anchor="w")
+            return
+        for rider in riders:
+            block = tk.Frame(frame, bg=pal.CARD)
+            block.pack(anchor="w", fill="x", pady=(4, 0))
+            line = tk.Frame(block, bg=pal.CARD)
+            line.pack(anchor="w", fill="x")
+            tk.Label(line, text=rider.name, font=ui.font(10, True), bg=pal.TEAM_FILL[rider.team],
+                     fg=pal.LABEL_ON_FILL[rider.team], padx=6).pack(side="left")
+            tk.Label(line, text=f" {rider.kind} · case {rider.position}", font=ui.font(10, True), bg=pal.CARD,
+                     fg=pal.TEXT).pack(side="left")
+            ahead = " ".join(terrain_text(self.game, s) for s in range(rider.position + 1, rider.position + 9))
+            tk.Label(line, text=f"   devant : {ahead}", font=ui.font(9), bg=pal.CARD, fg=pal.MUTED).pack(side="left")
+            row = tk.Frame(block, bg=pal.CARD)
+            row.pack(anchor="w", pady=(3, 0))
+            chosen = self.picks.get(rider)
+            for card in sorted(self.ctl.hands[rider], key=lambda c: c.value):
+                text = "A 2/9" if card.special == "attaque" else str(card.value)
+                caption = "fatigue" if card.exhaustion else "muscle" if card.special == "muscle" else ""
+                ui.PlayingCard(row, text, lambda r=rider, c=card: self.pick(r, c), fatigue=card.exhaustion,
+                               caption=caption, selected=card is chosen, scale=HAND_CARD_SCALE).pack(
+                    side="left", padx=(0, 8))
+        # la validation se fait avec le grand bouton d'action, à droite (« ✓ Valider les cartes »)
 
     def _flush_log(self) -> None:
         self.log.configure(state="normal")
