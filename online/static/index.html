@@ -36,7 +36,8 @@
       <section class="card">
         <h2>Partie <span class="code" id="lobby-code"></span></h2>
         <p class="muted">Envoie ce lien à tes amis :</p>
-        <div class="row gap"><input id="share" readonly><button id="copy">Copier</button></div>
+        <div class="row gap player-only"><input id="share" readonly><button id="copy">Copier</button></div>
+        <button class="shared-screen player-only" title="Ouvre une fenêtre avec le plateau seulement (ni main ni deck), à montrer à tout le monde : télé, vidéoprojecteur, partage d'écran">📺 Écran partagé</button>
         <h3>Équipes</h3>
         <div id="seats"></div>
         <p class="muted small">Une place « Joueur » restée libre au départ est jouée par l'IA.</p>
@@ -94,12 +95,13 @@
         <button data-camera="tete">Zoom tête de course</button>
       </div>
       <div class="segmented"><button id="animate" title="Déplacements et météo animés">✓ Animations</button></div>
+      <button class="shared-screen player-only" title="Ouvre une fenêtre avec le plateau seulement (ni main ni deck), à montrer à tout le monde : télé, vidéoprojecteur, partage d'écran">📺 Écran partagé</button>
       <button id="toggle-podium" class="hidden">Revoir la course</button>
       <button id="back-lobby" class="hidden">Revenir au salon</button>
     </div>
     <div id="revealed" class="revealed"></div>
     <div class="race-bottom">
-      <section class="card hand">
+      <section class="card hand player-only">
         <div id="hand-title" class="hand-title"></div>
         <div id="hand" class="cards"></div>
         <div id="my-riders" class="muted small"></div>
@@ -110,6 +112,18 @@
       </section>
     </div>
     <p class="error" id="race-error"></p>
+
+    <!-- deck de départ de mes coureurs : onglet sur le bord droit, panneau qui s'ouvre et se ferme -->
+    <button id="deck-tab" class="deck-tab hidden" aria-controls="deck-panel" aria-expanded="false"
+            title="Voir ou cacher le deck de départ de tes coureurs">🂠 Deck</button>
+    <aside id="deck-panel" class="deck-panel hidden" aria-label="Deck de départ">
+      <div class="deck-head">
+        <h2>Deck de départ</h2>
+        <button id="deck-close" title="Cacher le deck">✕</button>
+      </div>
+      <p class="muted small">Les cartes de chacun de tes coureurs au début de la course.</p>
+      <div id="deck-body"></div>
+    </aside>
   </main>
 
   <script src="app.js"></script>

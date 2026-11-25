@@ -170,3 +170,23 @@ def test_map_works_at_the_end_of_a_game():
     while not g.finished:
         g.play_turn()
     assert any(p[0] == "text" and p[3] == "ARRIVÉE" for p in map_primitives(g, g.winner))
+
+
+def test_simultaneous_choice_draws_every_hand_at_once():
+    ctl = TurnController(Game(num_teams=3, seed=2), ai_teams=[2], simultaneous=True)
+    assert ctl.phase == CHOOSE and ctl.current_rider is None
+    humans = [r for r in ctl.game.riders if r.team != 2]
+    assert set(ctl.hands) == set(humans) and all(len(h) == 4 for h in ctl.hands.values())
+    assert all(r in ctl.played for r in ctl.game.riders if r.team == 2)  # l'IA a déjà posé
+    with pytest.raises(RuntimeError):
+        ctl.choose(ctl.hands[humans[0]][0])
+    for rider in reversed(humans):  # n'importe quel ordre
+        card = ctl.hands[rider][-1]
+        ctl.choose_for(rider, card)
+        assert ctl.played[rider] is card and len(rider.recycle) == 3
+        with pytest.raises((ValueError, RuntimeError)):  # déjà posée (ou toutes posées : place au mouvement)
+            ctl.choose_for(rider, card)
+    assert ctl.phase == MOVEMENT and not ctl.hands
+    for _ in range(3):
+        ctl.advance()
+    assert ctl.game.turn == 1 and ctl.phase == CHOOSE and len(ctl.hands) == len(humans)

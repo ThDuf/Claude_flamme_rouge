@@ -45,8 +45,16 @@ mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas prop
 - Chacun **prend une place** (une équipe). L'hôte choisit le parcours, le nombre d'équipes, les extensions et,
   pour chaque équipe : Joueur, IA, ou équipe fantôme Peloton / Muscle (extension Peloton).
   Une place « Joueur » restée libre au départ est jouée par l'IA.
-- Pendant la course, chacun ne voit **que sa main** ; les coureurs choisissent leur carte chacun à leur tour,
-  puis n'importe quel joueur lance le mouvement, l'aspiration et la fatigue.
+- Pendant la course, chacun ne voit **que ses mains**. Au début du tour, tous les coureurs piochent en même
+  temps : chaque joueur voit les mains de son rouleur et de son sprinteur ensemble, touche une carte dans
+  chacune (on peut changer d'avis), puis **Valider mes cartes**. Tous les joueurs choisissent en même temps ;
+  quand toutes les cartes sont posées, n'importe quel joueur lance le mouvement, l'aspiration et la fatigue.
+  (Les enchères de la variante Échappée restent une équipe après l'autre.)
+- **Deck** : l'onglet sur le bord droit de l'écran ouvre ou cache le deck de départ de tes coureurs (cartes et
+  nombre d'exemplaires). Le navigateur se souvient s'il est ouvert.
+- **📺 Écran partagé** (salon et course) : ouvre une fenêtre avec le plateau seulement, sans main, sans deck et
+  sans bouton de jeu, à mettre sur une télé, un vidéoprojecteur ou en partage d'écran. Son adresse
+  (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
 - Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
   net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.

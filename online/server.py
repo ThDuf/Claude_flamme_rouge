@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):  # lancé comme un script : le dossier du jeu doit être importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, parse_view  # noqa: E402
+from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, Player, parse_view  # noqa: E402
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
 from flamme_rouge import palette as pal  # noqa: E402
 from flamme_rouge.boardview import FX_RAIN, FX_SUN, FX_WIND  # noqa: E402
@@ -70,7 +70,11 @@ class Api:
         with room.lock:
             if method == "POST" and path == "/api/join":
                 return {"code": room.code, "token": room.join(body.get("name")).token}
-            player = room.player(str(body.get("token") or query.get("token") or ""))
+            if method == "GET" and path == "/api/state" and query.get("watch"):
+                # écran partagé : la course vue par un spectateur (ni main ni deck), sans jeton
+                player = Player("", "Écran partagé")
+            else:
+                player = room.player(str(body.get("token") or query.get("token") or ""))
             if method == "GET" and path == "/api/state":
                 since = int(query.get("since") or 0)
                 camera = str(query.get("camera") or "")
@@ -93,6 +97,8 @@ class Api:
                 room.start(player)
             elif path == "/api/card":
                 room.play_card(player, int(body.get("index", -1)))
+            elif path == "/api/cards":
+                room.play_cards(player, body.get("choices"))
             elif path == "/api/advance":
                 room.advance(player, str(body.get("phase") or ""))
             elif path == "/api/lobby":

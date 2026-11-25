@@ -4,8 +4,10 @@ Un salon a un code (4 lettres). Le premier joueur l'a créé : il en est l'hôte
 nombre d'équipes, extensions, qui joue chaque équipe). Les autres le rejoignent avec le code et prennent une
 place libre. Au départ, les places « Joueur » restées libres sont jouées par l'IA.
 
-Pendant la course, chaque joueur ne reçoit que sa propre main ; les coureurs choisissent leur carte chacun à
-son tour (comme sur l'écran local), puis n'importe quel joueur lance le mouvement, l'aspiration et la fatigue.
+Pendant la course, chaque joueur ne reçoit que ses propres mains. Au début du tour, tous les coureurs piochent en
+même temps : chaque joueur choisit les cartes de ses deux coureurs ensemble, sans attendre les autres. Quand
+toutes les cartes sont posées, n'importe quel joueur lance le mouvement, l'aspiration et la fatigue.
+Les enchères de la variante Échappée restent, elles, une équipe après l'autre.
 
 Chaque changement augmente `version` : un navigateur qui a déjà la version courante ne retélécharge rien.
 """
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import math
 import secrets
+from collections import Counter
 import threading
 import time
 from dataclasses import dataclass, field
@@ -54,6 +57,12 @@ ACTION_TEXT = {
     SLIPSTREAM: "▶ ASPIRATION",
     EXHAUSTION: "▶ FATIGUE (puis tour suivant)",
 }
+
+
+def deck_summary(cards) -> list[dict]:
+    """Un deck en piles de cartes identiques, de la plus petite à la plus grande : [{label, count, fatigue}]."""
+    counts = Counter((c.value, c.exhaustion, str(c)) for c in cards)
+    return [{"label": label, "count": n, "fatigue": fatigue} for (_v, fatigue, label), n in sorted(counts.items())]
 
 
 class OnlineError(Exception):
@@ -114,6 +123,7 @@ class Room:
     ctl: Optional[TurnController] = None
     ai_teams: frozenset = frozenset()
     last_anim: Optional[dict] = None  # dernier mouvement ou aspiration, rejoué par les navigateurs
+    initial_decks: dict = field(default_factory=dict)  # nom du coureur -> son deck au départ (panneau « Deck »)
     version: int = 1
     touched: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -246,7 +256,11 @@ class Room:
                          team_types=team_types)
         self.ai_teams = frozenset(t for t in range(self.teams)
                                   if team_types[t] == TEAM_PLAYER and self.owner(t) is None)
-        self.ctl = TurnController(self.game, self.ai_teams, self.breakaway and self.breakaway_available())
+        # avant le contrôleur : il fait déjà piocher (enchères de l'IA, premier tour)
+        self.initial_decks = {r.name: deck_summary(r.draw_pile + r.recycle + r.hand) for r in self.game.riders
+                              if not self.game.is_ghost(r)}
+        self.ctl = TurnController(self.game, self.ai_teams, self.breakaway and self.breakaway_available(),
+                                  simultaneous=True)
         self.bump()
 
     def back_to_lobby(self, player: Player) -> None:
@@ -270,14 +284,33 @@ class Room:
         self.bump()
 
     def play_card(self, player: Player, index: int) -> None:
-        """Une carte : pour le coureur qui choisit (tour normal), ou la mise de l'échappée."""
+        """Variante Échappée : la carte misée par l'équipe qui enchérit."""
         ctl = self._running()
         rider = ctl.current_rider
-        if ctl.phase not in (CHOOSE, BREAKAWAY) or rider is None or rider.team != player.team:
-            raise OnlineError("Ce n'est pas à toi de choisir.")
+        if ctl.phase != BREAKAWAY or rider is None or rider.team != player.team:
+            raise OnlineError("Ce n'est pas à toi de miser.")
         if not 0 <= int(index) < len(ctl.hand):
             raise OnlineError("Carte inconnue.")
         ctl.choose(ctl.hand[int(index)])
+        self.bump()
+
+    def play_cards(self, player: Player, choices) -> None:
+        """Choix simultané : {nom du coureur: numéro de la carte dans sa main}, pour un ou plusieurs coureurs du
+        joueur. Tout est vérifié avant de poser quoi que ce soit."""
+        ctl = self._running()
+        if ctl.phase != CHOOSE or not isinstance(choices, dict) or not choices:
+            raise OnlineError("Ce n'est pas le moment de choisir.")
+        picks = []
+        for name, index in choices.items():
+            rider = next((r for r in ctl.hands if r.name == str(name)), None)
+            if rider is None or rider.team != player.team:
+                raise OnlineError(f"{name} n'a pas de carte à choisir.")
+            hand = ctl.hands[rider]
+            if not 0 <= int(index) < len(hand):
+                raise OnlineError("Carte inconnue.")
+            picks.append((rider, hand[int(index)]))
+        for rider, card in picks:
+            ctl.choose_for(rider, card)
         self.bump()
 
     def advance(self, player: Player, phase: str) -> None:
@@ -376,7 +409,8 @@ class Room:
                 shared["podium"] = podium_primitives(g, BOARD_W, MAP_H, 8.0, names)
             self._cache[key] = shared
         shared = self._cache[key]
-        my_turn = ctl.phase in (CHOOSE, BREAKAWAY) and rider is not None and rider.team == player.team
+        my_hands = [(r, h) for r, h in ctl.hands.items() if r.team == player.team] if ctl.phase == CHOOSE else []
+        my_turn = bool(my_hands) or (ctl.phase == BREAKAWAY and rider is not None and rider.team == player.team)
         bid = None  # variante Échappée : ce que voit l'équipe qui enchérit
         if ctl.phase == BREAKAWAY:
             team = ctl.bid_team
@@ -395,10 +429,13 @@ class Room:
                     bid = {"stage": "card", "round": ctl.bid_round}
             else:
                 waiting = ""
-        elif ctl.phase == CHOOSE and rider is not None:
-            who = self.owner(rider.team)
-            waiting = ("À toi : choisis la carte de " + rider.name) if my_turn else \
-                f"{rider.name} — {who.name if who else 'IA'} choisit sa carte…"
+        elif ctl.phase == CHOOSE:
+            late = sorted({(self.owner(r.team).name if self.owner(r.team) else "IA") for r in ctl.hands
+                           if r.team != player.team})
+            if my_turn:
+                waiting = "À toi : choisis une carte pour chacun de tes coureurs"
+            else:
+                waiting = "En attente de : " + ", ".join(late) if late else ""
         elif ctl.phase in ACTION_TEXT:
             waiting = "Toutes les cartes sont posées." if ctl.phase == MOVEMENT else "Regarde le plateau, puis continue."
         else:
@@ -415,7 +452,13 @@ class Room:
             "bid": bid,
             "rider": {"name": rider.name, "team": rider.team, "position": rider.position} if rider else None,
             "hand": [{"index": i, "label": str(c), "fatigue": c.exhaustion} for i, c in enumerate(ctl.hand)]
-            if my_turn else [],
+            if my_turn and ctl.phase == BREAKAWAY else [],
+            # choix simultané : une main par coureur du joueur qui n'a pas encore posé sa carte
+            "hands": [{"name": r.name, "team": r.team, "kind": r.kind, "position": r.position,
+                       "cards": [{"index": i, "label": str(c), "fatigue": c.exhaustion} for i, c in enumerate(h)]}
+                      for r, h in my_hands],
+            "decks": [{"name": r.name, "team": r.team, "kind": r.kind, "cards": self.initial_decks.get(r.name, [])}
+                      for r in mine if r.name in self.initial_decks],
             "my_riders": [{"name": r.name, "position": r.position, "draw": len(r.draw_pile), "recycle": len(r.recycle),
                            "fatigue": sum(c.exhaustion for c in r.draw_pile + r.recycle + r.hand)} for r in mine],
             "revealed": [{"name": r.name, "team": r.team, "card": str(c), "who": self._who(r)}

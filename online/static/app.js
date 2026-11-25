@@ -25,7 +25,9 @@ const el = (tag, attrs = {}, ...children) => {
 const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null,
                   anim: null, playedAnim: null, animate: true,
                   view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
-                  previewing: false }; // un zoom est affiché en attendant le dessin net du serveur
+                  previewing: false, // un zoom est affiché en attendant le dessin net du serveur
+                  picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
+                  watch: false }; // écran partagé : la course sans aucune information d'un joueur
 
 function store(key, value) {
   try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (e) { /* privé */ }
@@ -191,7 +193,8 @@ async function poll() {
   clearTimeout(pollTimer);
   const seq = ++pollSeq;
   try {
-    const params = { code: session.code, token: session.token, since: session.version, camera: session.camera };
+    const params = { code: session.code, since: session.version, camera: session.camera };
+    if (session.watch) params.watch = 1; else params.token = session.token;
     if (session.view) params.view = session.view.map((v) => v.toFixed(2)).join(",");
     const state = await get("/api/state", params);
     if (seq !== pollSeq) return; // une demande plus récente est partie : elle reprendra la boucle
@@ -206,6 +209,10 @@ async function poll() {
     }
   } catch (e) {
     if (seq !== pollSeq) return;
+    if (e.status === 400 && session.watch) { // écran partagé : la partie n'existe plus
+      $("subtitle").textContent = e.message;
+      return;
+    }
     if (e.status === 400) { // salon disparu ou jeton inconnu : retour à l'accueil
       store("fr-session-" + session.code, null);
       session.code = session.token = null;
@@ -683,6 +690,7 @@ function renderRace(state, previousVersion, hadRace) {
   // ma main
   const hand = $("hand");
   hand.innerHTML = "";
+  hand.classList.remove("stacked");
   if (race.bid && race.bid.stage === "rider") { // variante Échappée : quel coureur tente l'échappée ?
     $("hand-title").textContent = "Échappée : quel coureur la tente ? (2 cartes misées, 2 cartes Fatigue s'il part)";
     const row = el("div", { class: "bid-riders" });
@@ -691,24 +699,23 @@ function renderRace(state, previousVersion, hadRace) {
     }
     row.append(el("button", { onclick: () => bidRider(null) }, "Ne pas participer"));
     hand.append(row);
-  } else if (race.my_turn) {
+  } else if (race.bid && race.bid.stage === "card" && race.my_turn) { // mise de l'échappée
     $("hand-title").innerHTML = "";
-    if (race.bid && race.bid.stage === "card") {
-      $("hand-title").append(`Enchère ${race.bid.round} sur 2 pour `, riderTag(race.rider.name, race.rider.team),
-        " : la carte à miser (les autres vont à la défausse)");
-    } else {
-      $("hand-title").append("À toi : carte de ", riderTag(race.rider.name, race.rider.team),
-        ` (case ${race.rider.position})`);
-    }
+    $("hand-title").append(`Enchère ${race.bid.round} sur 2 pour `, riderTag(race.rider.name, race.rider.team),
+      " : la carte à miser (les autres vont à la défausse)");
     for (const card of race.hand) {
       hand.append(el("button", { class: card.fatigue ? "fatigue" : "", onclick: () => playCard(card.index) },
         card.label));
     }
+  } else if (race.hands.length) { // choix simultané : une main par coureur, validées ensemble
+    renderHands(race);
   } else {
     $("hand-title").textContent = state.me.team == null ? "Tu regardes la course (spectateur)." :
-      race.phase === "choose" || race.phase === "breakaway" ? "En attente des autres joueurs…" :
-      "Ta main apparaîtra à ton tour.";
+      race.phase === "choose" ? "Tes cartes sont posées. En attente des autres joueurs…" :
+      race.phase === "breakaway" ? "En attente des autres joueurs…" :
+      "Tes mains apparaîtront au prochain tour.";
   }
+  renderDecks(race);
   $("my-riders").textContent = race.my_riders.map((r) =>
     `${r.name} : case ${r.position} · pioche ${r.draw} · recyclage ${r.recycle} · fatigue ${r.fatigue}`).join("   —   ");
 
@@ -729,6 +736,92 @@ function renderRace(state, previousVersion, hadRace) {
     log.append(div);
   }
   if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function renderHands(race) {
+  // le choix en cours est gardé tant que les mêmes mains sont affichées (les autres joueurs font changer l'état)
+  const key = race.turn + "|" + race.hands.map((h) => h.name + ":" + h.cards.map((c) => c.label).join(",")).join(";");
+  if (session.picksKey !== key) { session.picksKey = key; session.picks = {}; }
+  $("hand-title").textContent = race.hands.length > 1 ?
+    "À toi : choisis une carte pour chacun de tes coureurs, puis valide." :
+    "À toi : choisis la carte de ton coureur, puis valide.";
+  const hand = $("hand");
+  hand.innerHTML = ""; // renderHands est rappelée à chaque clic sur une carte
+  hand.classList.add("stacked"); // une ligne par coureur
+  for (const h of race.hands) {
+    const row = el("div", { class: "rider-hand" });
+    row.append(el("div", { class: "rider-hand-title" }, riderTag(h.name, h.team),
+      ` ${h.kind === "rouleur" ? "Rouleur" : "Sprinteur"} · case ${h.position}`));
+    const cards = el("div", { class: "cards" });
+    for (const card of h.cards) {
+      const picked = session.picks[h.name] === card.index;
+      cards.append(el("button", {
+        class: (card.fatigue ? "fatigue" : "") + (picked ? " picked" : ""),
+        "aria-pressed": picked ? "true" : "false",
+        onclick: () => { session.picks[h.name] = card.index; renderHands(race); },
+      }, card.label));
+    }
+    row.append(cards);
+    hand.append(row);
+  }
+  const ready = race.hands.every((h) => session.picks[h.name] !== undefined);
+  hand.append(el("button", { class: "primary big validate", ...(ready ? {} : { disabled: "" }),
+    onclick: () => playCards(race.hands.map((h) => h.name)) },
+    ready ? "✓ Valider mes cartes" : "Choisis une carte par coureur"));
+}
+
+function renderDecks(race) {
+  const body = $("deck-body");
+  body.innerHTML = "";
+  $("deck-tab").classList.toggle("hidden", !race.decks.length);
+  const open = !!(race.decks.length && session.deckOpen);
+  $("deck-panel").classList.toggle("hidden", !open);
+  document.body.classList.toggle("deck-open", open);
+  for (const d of race.decks) {
+    const total = d.cards.reduce((n, c) => n + c.count, 0);
+    const box = el("div", { class: "deck" });
+    box.append(el("div", { class: "deck-title" }, riderTag(d.name, d.team),
+      ` ${d.kind === "rouleur" ? "Rouleur" : "Sprinteur"}`, el("span", { class: "muted small" }, ` · ${total} cartes`)));
+    const cards = el("div", { class: "deck-cards" });
+    for (const c of d.cards) {
+      cards.append(el("div", { class: "mini" + (c.fatigue ? " fatigue" : "") },
+        el("b", {}, c.label), el("span", {}, "×" + c.count)));
+    }
+    box.append(cards);
+    body.append(box);
+  }
+}
+
+function openSharedScreen() {
+  const url = location.origin + location.pathname + "?code=" + session.code + "&watch=1";
+  window.open(url, "flamme-rouge-ecran-" + session.code);
+}
+
+function startWatching(code) {
+  session.watch = true;
+  session.code = code;
+  document.body.classList.add("tv");
+  document.title = "Flamme Rouge · écran partagé " + code;
+  $("room-chip").innerHTML = "";
+  $("room-chip").append("Écran partagé · partie ", el("b", {}, code));
+  $("room-chip").classList.remove("hidden");
+  poll();
+}
+
+function setDeckOpen(open) {
+  session.deckOpen = open;
+  if (session.state && session.state.race) renderDecks(session.state.race);
+  $("deck-tab").classList.toggle("on", open);
+  $("deck-tab").setAttribute("aria-expanded", open ? "true" : "false");
+  store("fr-deck", open ? "1" : "0");
+}
+
+async function playCards(names) {
+  showError("race-error", null);
+  const choices = {};
+  for (const name of names) choices[name] = session.picks[name];
+  for (const b of $("hand").querySelectorAll("button")) b.disabled = true;
+  try { await api("/api/cards", { choices }); poll(); } catch (e) { showError("race-error", e); poll(); }
 }
 
 async function playCard(index) {
@@ -788,6 +881,10 @@ async function start() {
   });
   setupZoom();
   requestAnimationFrame(frame);
+  // panneau du deck de départ (côté droit) : ouvert ou fermé, réglage propre à ce navigateur
+  $("deck-tab").addEventListener("click", () => setDeckOpen(!session.deckOpen));
+  $("deck-close").addEventListener("click", () => setDeckOpen(false));
+  setDeckOpen(load("fr-deck") === "1");
   for (const b of $("camera").querySelectorAll("button")) {
     b.addEventListener("click", () => {
       session.camera = b.dataset.camera;
@@ -803,7 +900,10 @@ async function start() {
     return;
   }
   buildSettings();
-  const code = new URLSearchParams(location.search).get("code");
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  if (code && params.get("watch")) { startWatching(code.toUpperCase()); return; }
+  for (const b of document.querySelectorAll(".shared-screen")) b.addEventListener("click", openSharedScreen);
   if (code) {
     $("code").value = code.toUpperCase();
     const token = load("fr-session-" + code.toUpperCase());

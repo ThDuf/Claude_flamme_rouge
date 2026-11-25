@@ -44,6 +44,14 @@ def test_room_creation_seats_and_settings():
     assert same["same"] is True  # rien n'a changé : rien n'est renvoyé
 
 
+def play_all_hands(api, code, *tokens):
+    """Choix simultané : chaque joueur pose la première carte de chacun de ses coureurs, en une seule demande."""
+    for token in tokens:
+        hands = call(api, "/api/state", "GET", code=code, token=token)["race"]["hands"]
+        if hands:
+            call(api, "/api/cards", code=code, token=token, choices={h["name"]: 0 for h in hands})
+
+
 def test_a_whole_remote_race_each_player_sees_only_his_hand():
     api = Api()
     code, alice, bob = lobby_of_two(api)
@@ -59,13 +67,23 @@ def test_a_whole_remote_race_each_player_sees_only_his_hand():
         b = call(api, "/api/state", "GET", code=code, token=bob)["race"]
         if a["finished"]:
             break
-        assert not (a["hand"] and b["hand"])  # jamais deux mains visibles en même temps
         assert a["map"] and a["profile"]
         if a["phase"] == CHOOSE:
-            mover, other = (alice, bob) if a["my_turn"] else (bob, alice)
-            with pytest.raises(OnlineError):  # pas son tour
-                call(api, "/api/card", code=code, token=other, index=0)
-            call(api, "/api/card", code=code, token=mover, index=0)
+            # chacun ne voit que les mains de ses coureurs, et les deux joueurs choisissent en même temps
+            assert {h["team"] for h in a["hands"]} <= {0} and {h["team"] for h in b["hands"]} <= {1}
+            if steps == 0:
+                assert len(a["hands"]) == 2 and len(b["hands"]) == 2 and a["my_turn"] and b["my_turn"]
+                with pytest.raises(OnlineError):  # pas le coureur d'un autre joueur
+                    call(api, "/api/cards", code=code, token=bob, choices={a["hands"][0]["name"]: 0})
+                with pytest.raises(OnlineError):  # rien n'est posé si un des choix est faux
+                    call(api, "/api/cards", code=code, token=alice,
+                         choices={a["hands"][0]["name"]: 0, a["hands"][1]["name"]: 99})
+                assert len(call(api, "/api/state", "GET", code=code, token=alice)["race"]["hands"]) == 2
+                # Bob choisit d'abord, Alice ensuite : l'ordre ne compte pas
+                play_all_hands(api, code, bob)
+                waiting = call(api, "/api/state", "GET", code=code, token=bob)["race"]["waiting"]
+                assert "Alice" in waiting
+            play_all_hands(api, code, alice, bob)
         else:
             call(api, "/api/advance", code=code, token=bob, phase=a["phase"])
             call(api, "/api/advance", code=code, token=alice, phase=a["phase"])  # double clic : ignoré
@@ -117,10 +135,8 @@ def test_browser_geometry_matches_the_map_and_movements_are_replayed():
     race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
     assert race["anim"] is None and race["weather"] and race["geo"]["road"] and race["profile_geo"]["ys"]
     assert len(race["map_base"]) < len(race["map"])  # la route sans les coureurs
-    while race["phase"] == CHOOSE:
-        mover = alice if race["my_turn"] else bob
-        call(api, "/api/card", code=code, token=mover, index=0)
-        race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    play_all_hands(api, code, alice, bob)
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
     call(api, "/api/advance", code=code, token=alice, phase=race["phase"])  # mouvement
     after = call(api, "/api/state", "GET", code=code, token=bob)
     anim = after["race"]["anim"]
@@ -214,3 +230,34 @@ def test_http_server_serves_the_page_and_the_api():
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_initial_deck_is_sent_to_its_owner_only():
+    api = Api()
+    code, alice, bob = lobby_of_two(api)
+    call(api, "/api/start", code=code, token=alice)
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    decks = {d["name"]: d for d in race["decks"]}
+    assert set(decks) == {"1R", "1S"}  # seulement les coureurs d'Alice
+    rouleur = {c["label"]: c["count"] for c in decks["1R"]["cards"]}
+    assert rouleur == {"3": 3, "4": 3, "5": 3, "6": 3, "7": 3}
+    assert sum(c["count"] for c in decks["1S"]["cards"]) == 15 and "9" in [c["label"] for c in decks["1S"]["cards"]]
+    play_all_hands(api, code, alice, bob)  # le deck affiché reste celui du départ
+    later = call(api, "/api/state", "GET", code=code, token=alice)["race"]["decks"]
+    assert {d["name"]: d["cards"] for d in later} == {n: d["cards"] for n, d in decks.items()}
+    assert call(api, "/api/state", "GET", code=code, token=bob)["race"]["decks"][0]["name"].startswith("2")
+
+
+def test_shared_screen_sees_the_race_but_no_private_information():
+    api = Api()
+    code, alice, bob = lobby_of_two(api)
+    assert "lobby" in call(api, "/api/state", "GET", code=code, watch=1)
+    call(api, "/api/start", code=code, token=alice)
+    screen = call(api, "/api/state", "GET", code=code, watch=1)
+    race = screen["race"]
+    assert race["map"] and race["profile"] and race["log"] is not None
+    assert race["hands"] == [] and race["hand"] == [] and race["decks"] == [] and race["my_riders"] == []
+    assert not race["can_act"] and screen["me"]["team"] is None
+    assert [p["name"] for p in screen["players"]] == ["Alice", "Bob"]  # l'écran n'est pas un joueur du salon
+    with pytest.raises(OnlineError):  # sans jeton, on ne peut rien jouer
+        call(api, "/api/advance", code=code, watch=1, phase="movement")
