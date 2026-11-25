@@ -1,0 +1,142 @@
+:root {
+  --bg: #0b1220;
+  --panel: #111a2e;
+  --card: #17233f;
+  --card-hi: #1f3057;
+  --border: #2a3a60;
+  --text: #e8edf7;
+  --muted: #93a4c3;
+  --faint: #5d6f94;
+  --accent: #ff4d4f;
+  --good: #34d399;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 "Segoe UI", system-ui, sans-serif; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.error { color: var(--accent); min-height: 1.2em; font-weight: 600; }
+h2 { margin: 0 0 10px; font-size: 18px; }
+h3 { margin: 18px 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.row { display: flex; align-items: center; }
+.row.gap { gap: 8px; }
+.row.wrap { flex-wrap: wrap; }
+.row.space { justify-content: space-between; gap: 12px; margin-top: 10px; }
+
+.top { display: flex; align-items: baseline; gap: 14px; padding: 12px 20px; background: var(--panel);
+       border-bottom: 3px solid var(--accent); }
+.logo { font-weight: 800; font-size: 24px; letter-spacing: .02em; }
+.logo span { color: var(--accent); }
+.subtitle { color: var(--muted); }
+.room-chip { margin-left: auto; color: var(--muted); }
+.room-chip b { color: var(--text); letter-spacing: .15em; }
+
+.screen { padding: 16px; max-width: 1400px; margin: 0 auto; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.card.narrow { max-width: 440px; margin: 40px auto; }
+
+input, select, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border);
+                        border-radius: 6px; padding: 8px 12px; }
+input { width: 100%; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { cursor: pointer; font-weight: 600; white-space: nowrap; }
+button:hover:not(:disabled) { background: var(--card-hi); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
+button.big { padding: 12px 24px; font-size: 17px; }
+.code-input { text-transform: uppercase; letter-spacing: .3em; font-weight: 700; max-width: 140px; }
+.code { color: var(--accent); letter-spacing: .2em; }
+
+.lobby-grid { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .lobby-grid { grid-template-columns: 1fr; } }
+.seat { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border);
+        border-radius: 8px; margin-bottom: 6px; background: var(--panel); flex-wrap: wrap; }
+.dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; flex: none; }
+.seat .who { flex: 1; min-width: 80px; }
+.seat select, .seat button { padding: 4px 8px; font-size: 13px; }
+.ext { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border);
+       border-radius: 6px; background: var(--panel); cursor: pointer; }
+.ext input { width: auto; }
+#extensions, #breakaway-row { margin-top: 8px; }
+.bid-riders { display: flex; flex-wrap: wrap; gap: 8px; }
+/* choix du coureur de l'échappée : des boutons ordinaires, pas des cartes */
+.cards .bid-riders button { width: auto; height: auto; font-size: 15px; font-weight: 600; padding: 10px 16px;
+                            background: var(--panel); color: var(--text); border: 1px solid var(--border);
+                            border-radius: 6px; transform: none; }
+.cards .bid-riders button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cards .bid-riders button:hover:not(:disabled) { filter: brightness(1.1); border-color: var(--accent); }
+canvas { display: block; width: 100%; height: auto; }
+#preview, #preview-profile { margin-top: 10px; border-radius: 6px; }
+
+.race-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.badge { background: var(--accent); color: #fff; font-weight: 700; padding: 3px 10px; border-radius: 4px; }
+.title { font-size: 20px; font-weight: 700; }
+/* la carte et le profil (1000 × 530) tiennent dans la hauteur de l'écran, avec la main en dessous à portée */
+.board { padding: 0; overflow: hidden; max-width: max(640px, calc((100vh - 330px) * 1000 / 530)); margin: 0 auto; }
+.layer { position: relative; }
+#map-layer { cursor: grab; touch-action: none; }
+#map-layer.dragging { cursor: grabbing; }
+.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tools { margin: 10px 0; }
+.segmented { display: flex; gap: 4px; }
+.segmented button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.revealed { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; color: var(--faint);
+            font-size: 12px; font-weight: 700; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--border);
+        border-radius: 4px; padding: 2px 6px; color: var(--text); font-weight: 600; }
+.rider { padding: 0 5px; border-radius: 3px; font-weight: 700; }
+
+.race-bottom { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 14px; }
+@media (max-width: 800px) { .race-bottom { grid-template-columns: 1fr; } }
+.hand-title { font-weight: 700; margin-bottom: 10px; }
+.cards { display: flex; gap: 10px; flex-wrap: wrap; min-height: 90px; }
+.cards button { width: 64px; height: 88px; font-size: 26px; font-weight: 800; background: #f8fafc; color: #0f172a;
+                border: 3px solid #f8fafc; border-radius: 8px; }
+.cards button.fatigue { background: #94a3b8; border-color: #94a3b8; }
+.cards button:hover:not(:disabled) { background: #fff; border-color: var(--accent); transform: translateY(-3px); }
+.race-right { display: flex; flex-direction: column; gap: 10px; }
+.log { height: 220px; overflow-y: auto; font-size: 13px; padding: 10px 14px; }
+.log .heading { font-weight: 700; margin-top: 6px; }
+
+/* choix simultané : une main par coureur, puis « Valider » */
+.rider-hand { margin-bottom: 12px; }
+.rider-hand-title { margin-bottom: 6px; font-weight: 600; }
+.rider-hand .cards { min-height: 0; }
+.cards button.picked { background: #fff; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent);
+                       transform: translateY(-4px); }
+.cards button.validate { width: 100%; height: auto; font-size: 17px; background: var(--accent); color: #fff;
+                         border: 1px solid var(--accent); border-radius: 6px; transform: none; margin-top: 4px; }
+.cards button.validate:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); transform: none; }
+#hand.stacked { flex-direction: column; flex-wrap: nowrap; gap: 0; }
+
+/* deck de départ : onglet sur le bord droit et panneau */
+.deck-tab { position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 20; writing-mode: vertical-rl;
+            padding: 14px 8px; border-radius: 8px 0 0 8px; border-right: none; background: var(--card-hi); }
+.deck-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.deck-panel { position: fixed; right: 0; top: 0; bottom: 0; width: min(320px, 85vw); z-index: 19; overflow-y: auto;
+              background: var(--panel); border-left: 3px solid var(--accent); padding: 16px 48px 16px 16px;
+              box-shadow: -8px 0 24px rgba(0, 0, 0, .4); }
+.deck-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.deck-head h2 { margin: 0; }
+.deck-head button { padding: 4px 10px; }
+.deck { margin-top: 14px; }
+.deck-title { font-weight: 600; margin-bottom: 8px; }
+.deck-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.deck-cards { gap: 6px; }
+.mini-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mini { display: flex; align-items: center; justify-content: center; width: 42px; height: 58px;
+        background: #f8fafc; color: #0f172a; border-radius: 6px; font-size: 28px; font-weight: 800; line-height: 1; }
+.mini-count { font-size: 13px; font-weight: 700; color: var(--muted); }
+.mini.fatigue { background: #94a3b8; }
+
+/* écran partagé (?watch=1) : le plateau pour tout le monde, sans rien de privé ni bouton de jeu */
+.shared-screen { margin-top: 10px; }
+.tools .shared-screen { margin-top: 0; }
+body.tv .player-only, body.tv #action, body.tv #deck-tab, body.tv #deck-panel, body.tv #back-lobby,
+body.tv #host-settings, body.tv #start, body.tv #seats button, body.tv #seats select,
+body.tv #lobby-error, body.tv #race-error { display: none !important; }
+body.tv .race-bottom { grid-template-columns: 1fr; }
+body.tv .board { max-width: max(640px, calc((100vh - 230px) * 1000 / 530)); }
+/* grand écran : le panneau du deck pousse la course au lieu de la recouvrir */
+@media (min-width: 1100px) { body.deck-open #race { margin-right: 320px; } }

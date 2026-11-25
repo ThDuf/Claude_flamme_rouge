@@ -3,6 +3,7 @@
 Une interface (texte ou graphique) n'a qu'à appeler :
   - (variante Échappée) choose_bid_rider(coureur ou None) puis choose(carte) tant que phase == BREAKAWAY ;
   - choose(carte) tant que phase == CHOOSE ;
+    (choix simultané, pour le jeu en ligne : choose_for(coureur, carte) pour chaque coureur de `hands`) ;
   - advance() pour passer à la phase suivante (mouvement, aspiration, fatigue).
 Les événements à afficher s'accumulent dans `log` (voir drain_log).
 """
@@ -40,11 +41,16 @@ def describe(card: Card) -> str:
 
 
 class TurnController:
-    def __init__(self, game: Game, ai_teams: Iterable[int] = (), breakaway: bool = False):
+    def __init__(self, game: Game, ai_teams: Iterable[int] = (), breakaway: bool = False,
+                 simultaneous: bool = False):
         """`ai_teams` : numéros des équipes jouées par l'IA (0 = première équipe) ; leurs cartes sont choisies seules.
-        `breakaway` : variante Échappée (extension Peloton), seulement si le parcours a une tuile Échappée."""
+        `breakaway` : variante Échappée (extension Peloton), seulement si le parcours a une tuile Échappée.
+        `simultaneous` : tous les coureurs piochent en même temps au début du tour et leurs cartes se choisissent
+        dans n'importe quel ordre (`hands`, `choose_for`) ; sinon un coureur après l'autre (`current_rider`)."""
         self.game = game
         self.ai_teams = frozenset(ai_teams)
+        self.simultaneous = simultaneous
+        self.hands: dict[Rider, list[Card]] = {}  # choix simultané : les mains encore à jouer
         # cartes révélées au dernier mouvement (toutes les équipes) et numéro de ce tour : pour les afficher
         self.last_revealed: dict[Rider, Card] = {}
         self.last_revealed_turn: Optional[int] = None
@@ -69,7 +75,7 @@ class TurnController:
     @property
     def current_rider(self) -> Optional[Rider]:
         if self.phase == CHOOSE:
-            return self.game.riders[self.index]
+            return None if self.simultaneous else self.game.riders[self.index]
         if self.phase == BREAKAWAY:
             return self.bid_rider
         return None
@@ -174,36 +180,68 @@ class TurnController:
         self.index = 0
         self.phase = CHOOSE
         self.game.new_turn_cards()
-        self._draw_next()
+        if self.simultaneous:
+            self._draw_all()
+        else:
+            self._draw_next()
+
+    def _draw_for(self, rider: Rider) -> Optional[list[Card]]:
+        """Pioche pour un coureur. Fantôme, IA ou main vide : la carte est posée tout de suite (renvoie None) ;
+        sinon renvoie la main que le joueur doit regarder."""
+        if self.game.is_ghost(rider):  # équipe fantôme (Peloton, Muscle) : sa carte sera retournée au mouvement
+            self.played[rider] = self.game.ghost_card(rider)
+            return None
+        hand = self.game.draw_hand_for(rider)
+        size = self.game.hand_size(rider)
+        if size != 4:
+            wind = "vent arrière" if size > 4 else "vent de face"
+            self.log.append(LogLine(f"{rider.name} : {wind}, pioche {size} cartes", rider.team))
+        if hand and rider.team in self.ai_teams:  # l'IA choisit tout de suite, sans montrer sa main
+            card = choose_card(self.game, rider, hand)
+            self.played[rider] = self.game.play_from_hand(rider, hand, card)
+            self.log.append(LogLine(f"{rider.name} (IA) a posé une carte (face cachée)", rider.team))
+            return None
+        if hand:
+            return hand
+        # Plus de cartes Énergie : une carte Fatigue est jouée automatiquement.
+        self.played[rider] = self.game.play_from_hand(rider, hand, None)
+        self.log.append(LogLine(f"{rider.name} n'a plus de cartes : carte Fatigue jouée", rider.team))
+        return None
 
     def _draw_next(self) -> None:
         riders = self.game.riders
         while self.index < len(riders):
-            rider = riders[self.index]
-            if self.game.is_ghost(rider):  # équipe fantôme (Peloton, Muscle) : sa carte sera retournée au mouvement
-                self.played[rider] = self.game.ghost_card(rider)
-                self.index += 1
-                continue
-            hand = self.game.draw_hand_for(rider)
-            size = self.game.hand_size(rider)
-            if size != 4:
-                wind = "vent arrière" if size > 4 else "vent de face"
-                self.log.append(LogLine(f"{rider.name} : {wind}, pioche {size} cartes", rider.team))
-            if hand and rider.team in self.ai_teams:  # l'IA choisit tout de suite, sans montrer sa main
-                card = choose_card(self.game, rider, hand)
-                self.played[rider] = self.game.play_from_hand(rider, hand, card)
-                self.log.append(LogLine(f"{rider.name} (IA) a posé une carte (face cachée)", rider.team))
-                self.index += 1
-                continue
+            hand = self._draw_for(riders[self.index])
             if hand:
                 self.hand = hand
                 return
-            # Plus de cartes Énergie : une carte Fatigue est jouée automatiquement.
-            self.played[rider] = self.game.play_from_hand(rider, hand, None)
-            self.log.append(LogLine(f"{rider.name} n'a plus de cartes : carte Fatigue jouée", rider.team))
             self.index += 1
         self.hand = []
         self.phase = MOVEMENT
+
+    def _draw_all(self) -> None:
+        """Choix simultané : chaque coureur pioche sa main ; il reste à jouer celles de `hands`."""
+        self.hands = {}
+        for rider in self.game.riders:
+            hand = self._draw_for(rider)
+            if hand:
+                self.hands[rider] = hand
+        self.hand = []
+        if not self.hands:
+            self.phase = MOVEMENT
+
+    def choose_for(self, rider: Rider, card: Card) -> None:
+        """Choix simultané : la carte d'un coureur qui a encore sa main ; quand toutes sont posées, place au mouvement."""
+        if self.phase != CHOOSE or not self.simultaneous:
+            raise RuntimeError("Ce n'est pas le moment de choisir une carte.")
+        hand = self.hands.get(rider)
+        if hand is None:
+            raise ValueError(f"{rider.name} a déjà posé sa carte.")
+        self.played[rider] = self.game.play_from_hand(rider, hand, card)
+        del self.hands[rider]
+        self.log.append(LogLine(f"{rider.name} a posé une carte (face cachée)", rider.team))
+        if not self.hands:
+            self.phase = MOVEMENT
 
     def choose(self, card: Card) -> None:
         if self.phase == BREAKAWAY and self.bid_rider is not None:  # carte misée pour l'échappée
@@ -213,6 +251,8 @@ class TurnController:
             return
         if self.phase != CHOOSE:
             raise RuntimeError("Ce n'est pas le moment de choisir une carte.")
+        if self.simultaneous:
+            raise RuntimeError("Choix simultané : utiliser choose_for(coureur, carte).")
         rider = self.game.riders[self.index]
         self.played[rider] = self.game.play_from_hand(rider, self.hand, card)
         self.log.append(LogLine(f"{rider.name} a posé une carte (face cachée)", rider.team))
