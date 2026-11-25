@@ -41,6 +41,8 @@ Pour essayer une modification sur ton PC avant de la pousser : `python -m online
 - **📺 Écran partagé** (salon et course) : ouvre une fenêtre avec le plateau seulement, sans main, sans deck et
   sans bouton de jeu, à mettre sur une télé, un vidéoprojecteur ou en partage d'écran. Son adresse
   (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
+- Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », le plateau en relief et
+  les coureurs en petits cyclistes ; ⟲ ⟳ tournent le plateau de 30°.
 - Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
   net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.
@@ -64,7 +66,7 @@ Pour essayer une modification sur ton PC avant de la pousser : `python -m online
 
 ## Pas encore en ligne
 
-Grand Tour, éditeur de parcours, vue 3D.
+Grand Tour, éditeur de parcours.
 
 ## Technique
 

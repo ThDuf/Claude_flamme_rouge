@@ -25,6 +25,7 @@ const el = (tag, attrs = {}, ...children) => {
 const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null,
                   anim: null, playedAnim: null, animate: true,
                   view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
+                  iso: false, isoAngle: null, // vue 3D (option) ; angle null = choisi par le serveur
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
                   watch: false }; // écran partagé : la course sans aucune information d'un joueur
@@ -196,6 +197,7 @@ async function poll() {
     const params = { code: session.code, since: session.version, camera: session.camera };
     if (session.watch) params.watch = 1; else params.token = session.token;
     if (session.view) params.view = session.view.map((v) => v.toFixed(2)).join(",");
+    if (session.iso) params.iso = session.isoAngle == null ? "auto" : String(session.isoAngle);
     const state = await get("/api/state", params);
     if (seq !== pollSeq) return; // une demande plus récente est partie : elle reprendra la boucle
     if (!state.same) {
@@ -396,10 +398,51 @@ function makeAnimation(data) { // comme movement_animation / slipstream_animatio
   };
 }
 
+function cyclistShapes(shapes, cx, cy, radius, font, r, facing) { // vue 3D : comme boardview._iso_cyclist
+  const c = session.info.colors, cy_ = c.cyclist;
+  const u = radius * 0.95, body = TEAM_FILL[r.team], stroke = Math.max(1, u * 0.16);
+  const at = (x, y) => [cx + facing * x * u, cy - y * u];
+  const line = (a, b, color, width) => shapes.push(["line", ...at(...a), ...at(...b), color, width]);
+  shapes.push(["oval", cx - u * 1.2 + 2, cy - u * 0.28 + 1, cx + u * 1.2 + 2, cy + u * 0.28 + 1, c.shadow, "", 0]);
+  const wr = 0.42;
+  for (const hub of [-0.58, 0.58]) {
+    const [x, y] = at(hub, wr);
+    shapes.push(["oval", x - wr * u, y - wr * u, x + wr * u, y + wr * u, "", cy_.wheel, Math.max(1.5, stroke)]);
+  }
+  const rear = [-0.58, wr], bb = [-0.05, wr], seat = [-0.22, 1.0], head = [0.42, 1.0], front = [0.58, wr];
+  for (const [a, b] of [[rear, bb], [bb, seat], [seat, head], [head, front], [rear, seat], [bb, head]]) {
+    line(a, b, cy_.frame, Math.max(1, stroke * 0.7));
+  }
+  line(head, [0.52, 1.12], cy_.frame, Math.max(1, stroke * 0.7));
+  const hip = [-0.2, 1.08], knee = [0.12, 0.78], pedal = [-0.02, 0.3], shoulder = [0.3, 1.45], hand = [0.52, 1.12];
+  const legs = mix(body, "#000000", 0.45);
+  line(hip, knee, legs, stroke * 1.1);
+  line(knee, pedal, legs, stroke);
+  line(hip, shoulder, body, stroke * 2.2);
+  line(shoulder, hand, body, stroke * 1.1);
+  const [hx, hy] = at(0.45, 1.66), hr = 0.2 * u;
+  shapes.push(["oval", hx - hr, hy - hr, hx + hr, hy + hr, cy_.skin, "", 0]);
+  shapes.push(["poly", [hx - hr * 1.1, hy - hr * 0.1, hx - hr * 0.6, hy - hr * 1.15, hx + hr * 0.6, hy - hr * 1.15,
+                        hx + hr * 1.1, hy - hr * 0.1], body, mix(body, "#000000", 0.4), 1]);
+  const ty = cy - (cy_.height + 0.25) * u - font * 0.6, tw = Math.max(font * 1.6, u * 1.1);
+  shapes.push(["rect", cx - tw, ty - font * 0.75, cx + tw, ty + font * 0.75, body, c.rider_outline, 1]);
+  shapes.push(["text", cx, ty, r.name, LABEL_ON_FILL[r.team], Math.max(font - 1, 7), true, "center"]);
+}
+
 function riderShapes(race, positions) { // les pastilles des coureurs, comme dans map_primitives
   const c = session.info.colors;
-  const { road, radius, font } = race.geo;
+  const { road, radius, font, iso } = race.geo;
   const where = race.riders.map((r) => ({ r, at: positions[r.name] || [r.position, r.lane] }));
+  if (iso) { // vue 3D : petits cyclistes, du plus loin (haut de l'écran) au plus proche
+    for (const w of where) w.xy = roadPoint(road, w.at[0], w.at[1]);
+    where.sort((a, b) => a.xy[1] - b.xy[1]);
+    const shapes = [];
+    for (const { r, at, xy } of where) {
+      const ahead = roadPoint(road, at[0] + 0.3, at[1]), behind = roadPoint(road, at[0] - 0.3, at[1]);
+      cyclistShapes(shapes, xy[0], xy[1], radius, font, r, ahead[0] >= behind[0] ? 1 : -1);
+    }
+    return shapes;
+  }
   where.sort((a, b) => a.at[0] - b.at[0]); // ceux de derrière d'abord
   const shapes = [];
   for (const { r, at } of where) {
@@ -866,6 +909,31 @@ async function start() {
     session.showPodium = !session.showPodium;
     if (session.state) renderRace(session.state);
   });
+  // vue 3D : une option (la 2D par défaut), réglage propre à ce navigateur ; ⟲ ⟳ tournent le plateau
+  session.iso = load("fr-iso") === "1";
+  const isoButton = $("iso");
+  const paintIso = () => {
+    isoButton.classList.toggle("on", session.iso);
+    isoButton.textContent = (session.iso ? "✓ " : "") + "Vue 3D";
+  };
+  paintIso();
+  const redrawView = () => { session.view = null; session.anim = null; session.version = 0; poll(); };
+  isoButton.addEventListener("click", () => {
+    session.iso = !session.iso;
+    store("fr-iso", session.iso ? "1" : "0");
+    paintIso();
+    redrawView();
+  });
+  const rotate = (step) => () => {
+    const race = session.state && session.state.race;
+    const current = session.isoAngle != null ? session.isoAngle : race && race.iso_angle != null ? race.iso_angle : 45;
+    session.isoAngle = ((current + step) % 360 + 360) % 360;
+    if (!session.iso) { session.iso = true; store("fr-iso", "1"); paintIso(); }
+    redrawView();
+  };
+  $("rotate-left").addEventListener("click", rotate(-30));
+  $("rotate-right").addEventListener("click", rotate(30));
+
   // animations (déplacements, météo) : réglage propre à ce navigateur
   session.animate = load("fr-animate") !== "0";
   const animToggle = $("animate");

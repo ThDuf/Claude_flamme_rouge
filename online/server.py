@@ -20,17 +20,21 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):  # lancé comme un script : le dossier du jeu doit être importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, Player, parse_view  # noqa: E402
+from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, Player, parse_iso, parse_view  # noqa: E402
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
 from flamme_rouge import palette as pal  # noqa: E402
-from flamme_rouge.boardview import FX_RAIN, FX_SUN, FX_WIND  # noqa: E402
+from flamme_rouge.boardview import (  # noqa: E402
+    CYCLIST_FRAME, CYCLIST_HEIGHT, CYCLIST_SKIN, CYCLIST_WHEEL, FX_RAIN, FX_SUN, FX_WIND,
+)
 from flamme_rouge.weather import CROSSWIND, HEADWIND, RAIN, SUNNY, TAILWIND  # noqa: E402
 
 # couleurs des animations du navigateur (les mêmes que dans Tkinter)
 FX_COLORS = {
     "rain": FX_RAIN, "sun": FX_SUN, "wind": {k: v for k, v in FX_WIND.items()},
     "grass": pal.GRASS, "road": pal.TERRAIN_FILL["."], "card": pal.CARD, "shadow": pal.SHADOW,
-    "rider_outline": pal.RIDER_OUTLINE, "effects": {"rain": RAIN, "tailwind": TAILWIND, "headwind": HEADWIND,
+    "rider_outline": pal.RIDER_OUTLINE, "current_ring": pal.CURRENT_RING,
+    "cyclist": {"wheel": CYCLIST_WHEEL, "frame": CYCLIST_FRAME, "skin": CYCLIST_SKIN, "height": CYCLIST_HEIGHT},
+    "effects": {"rain": RAIN, "tailwind": TAILWIND, "headwind": HEADWIND,
                                                     "crosswind": CROSSWIND, "sunny": SUNNY},
 }
 
@@ -78,9 +82,10 @@ class Api:
                 since = int(query.get("since") or 0)
                 camera = str(query.get("camera") or "")
                 view = parse_view(query.get("view"))
+                iso = parse_iso(query.get("iso"))
                 if since == room.version:
                     return {"same": True, "version": room.version}
-                return compact(room.state(player, camera, view))
+                return compact(room.state(player, camera, view, iso))
             if method != "POST":
                 raise OnlineError("Action inconnue.")
             if path == "/api/seat":

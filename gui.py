@@ -36,7 +36,8 @@ from flamme_rouge.controller import (
     SLIPSTREAM,
     TurnController,
 )
-from flamme_rouge.decks import deck_text
+from flamme_rouge.decks import deck_summary, deck_text, whole_deck
+from flamme_rouge.game import TEAM_PLAYER
 from flamme_rouge.tiles import load_track_file
 
 PHASE_TITLES = {
@@ -71,6 +72,7 @@ TOUR_PANEL_W = 230  # Grand Tour : largeur du panneau des jetons et des temps
 PANEL_PER_ROW = 4  # pastilles par ligne dans ce panneau
 SIDE_PANEL_W = 330  # ce panneau quand il est à droite de la carte (écran large)
 ROTATE_STEP = 30  # degrés : un clic sur ⟲ ou ⟳ en vue 3D
+DECK_PANEL_W, DECK_TAB_W, DECK_PER_ROW = 330, 34, 5  # panneau « Deck de départ » sur le bord droit
 CAMERA_ALL = "tout"
 CAMERA_CHOICES = [(CAMERA_ALL, "Tout le parcours"), (FOLLOW_PELOTON, "Zoom peloton"), (FOLLOW_HEAD, "Zoom tête de course")]
 
@@ -105,10 +107,14 @@ class App:
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
         # caméra : "tout" (le parcours entier), "peloton" ou "tete" (suit ce groupe), "" (cadrage manuel)
         self.camera_var = tk.StringVar(value=CAMERA_ALL)
-        self.iso_var = tk.BooleanVar(value=True)  # vue 3D isométrique du plateau
+        self.iso_var = tk.BooleanVar(value=False)  # vue 3D isométrique du plateau (option ; la 2D par défaut)
         self.iso_angle = None  # rotation de la vue 3D ; None = celle qui montre le parcours le plus grand
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
+        # deck de départ de chaque coureur (panneau « Deck » sur le bord droit), relevé avant le premier tour
+        self.start_decks = {r: deck_summary(whole_deck(r)) for r in self.game.riders}
+        self.deck_open = False
         self._build()
+        self._build_deck_panel()
         self.refresh()
 
     # --------------------------------------------------------------- construction
@@ -426,6 +432,78 @@ class App:
 
     # ---------------------------------------------------------- fenêtre des decks
 
+    # ------------------------------------------------------------ deck de départ (bord droit)
+
+    def _build_deck_panel(self) -> None:
+        """Onglet « Deck » sur le bord droit de la fenêtre, et le panneau qu'il ouvre : le deck de départ des coureurs
+        de l'équipe qui joue, une petite carte par valeur avec le nombre d'exemplaires dessous (comme en ligne)."""
+        panel = self.deck_panel = tk.Frame(self.parent, bg=pal.PANEL, highlightthickness=3,
+                                           highlightbackground=pal.ACCENT, highlightcolor=pal.ACCENT)
+        head = tk.Frame(panel, bg=pal.PANEL)
+        head.pack(fill="x", padx=(16, DECK_TAB_W + 10), pady=(14, 4))
+        tk.Label(head, text="Deck de départ", font=ui.font(15, True), bg=pal.PANEL, fg=pal.TEXT).pack(side="left")
+        ui.FlatButton(head, "✕", lambda: self.set_deck_open(False), size=10, style="ghost", padx=8, pady=2).pack(
+            side="right")
+        self.deck_body = tk.Frame(panel, bg=pal.PANEL)
+        self.deck_body.pack(fill="both", expand=True, padx=(16, DECK_TAB_W + 10))
+        tab = self.deck_tab = tk.Label(self.parent, text="🂠\n\nD\nE\nC\nK", font=ui.font(10, True), bg=pal.CARD_HI,
+                                       fg=pal.TEXT, padx=7, pady=12, cursor="hand2", justify="center",
+                                       highlightthickness=1, highlightbackground=pal.BORDER)
+        tab.place(relx=1.0, rely=0.5, anchor="e")
+        tab.bind("<ButtonRelease-1>", lambda _e: self.set_deck_open(not self.deck_open))
+        ui.Tooltip(tab, "Voir ou cacher le deck de départ des coureurs de l'équipe qui joue")
+
+    def set_deck_open(self, open_: bool) -> None:
+        self.deck_open = open_
+        if open_:
+            self.deck_panel.place(relx=1.0, rely=0.0, relheight=1.0, anchor="ne", width=DECK_PANEL_W)
+            self._show_deck_panel()
+        else:
+            self.deck_panel.place_forget()
+        self.deck_tab.configure(bg=pal.ACCENT if open_ else pal.CARD_HI, fg="#ffffff" if open_ else pal.TEXT)
+        self.deck_tab.lift()  # l'onglet reste au-dessus du panneau, pour le refermer
+
+    def _deck_team(self) -> int:
+        """L'équipe dont on montre le deck : celle du coureur qui choisit, sinon la première équipe d'un joueur."""
+        rider = self.ctl.current_rider
+        if rider is not None:
+            return rider.team
+        humans = [t for t in range(len(self.game.team_types))
+                  if t not in self.ctl.ai_teams and self.game.team_types[t] == TEAM_PLAYER]
+        return humans[0] if humans else 0
+
+    def _show_deck_panel(self) -> None:
+        if not self.deck_open:
+            return
+        for widget in self.deck_body.winfo_children():
+            widget.destroy()
+        team = self._deck_team()
+        riders = [r for r in self.start_decks if r.team == team]
+        for rider in riders:
+            cards = self.start_decks[rider]
+            total = sum(c["count"] for c in cards)
+            title = tk.Frame(self.deck_body, bg=pal.PANEL)
+            title.pack(fill="x", pady=(12, 6))
+            tk.Label(title, text=rider.name, font=ui.font(10, True), bg=pal.TEAM_FILL[rider.team],
+                     fg=pal.LABEL_ON_FILL[rider.team], padx=5).pack(side="left")
+            tk.Label(title, text=f" {rider.kind.capitalize()}", font=ui.font(11, True), bg=pal.PANEL,
+                     fg=pal.TEXT).pack(side="left")
+            tk.Label(title, text=f" · {total} cartes", font=ui.font(9), bg=pal.PANEL, fg=pal.MUTED).pack(side="left")
+            grid = tk.Frame(self.deck_body, bg=pal.PANEL)
+            grid.pack(fill="x")
+            for i, card in enumerate(cards):
+                cell = tk.Frame(grid, bg=pal.PANEL)
+                cell.grid(row=i // DECK_PER_ROW, column=i % DECK_PER_ROW, padx=(0, 6), pady=(0, 6))
+                tk.Label(cell, text=card["label"], font=ui.font(20 if len(card["label"]) <= 2 else 12, True),
+                         bg="#94a3b8" if card["fatigue"] else "#f8fafc", fg="#0f172a", width=2 if len(card["label"]) <= 2 else 3,
+                         height=1, padx=4, pady=6).pack()
+                tk.Label(cell, text=f"×{card['count']}", font=ui.font(10, True), bg=pal.PANEL, fg=pal.MUTED).pack()
+                ui.Tooltip(cell, f"{card['count']} carte{'s' if card['count'] > 1 else ''} {card['label']}")
+        team_name = f"Équipe {team + 1}"
+        tk.Label(self.deck_body, text=f"{team_name} : le deck avant la première carte de l'étape.", font=ui.font(8),
+                 bg=pal.PANEL, fg=pal.FAINT, anchor="w", justify="left", wraplength=DECK_PANEL_W - DECK_TAB_W - 40).pack(
+            fill="x", pady=(10, 0))
+
     def on_decks(self) -> None:
         """Ouvre (ou ramène au premier plan) la fenêtre qui montre le contenu des decks."""
         if self.deck_win is not None and self.deck_win.winfo_exists():
@@ -499,6 +577,7 @@ class App:
 
         self._show_hand()
         self._refresh_decks()
+        self._show_deck_panel()
         tour_end = phase == FINISHED and self.on_stage_end is not None
         self.action_btn.config(
             text="▶ Résultats de l'étape et classements" if tour_end else ACTION_TEXT[phase],
@@ -753,12 +832,11 @@ class App:
             tk.Label(frame, text=f"Devant toi :  {ahead}", font=ui.font(11), bg=pal.CARD, fg=pal.MUTED).pack(anchor="w", pady=(8, 8))
         row = tk.Frame(frame, bg=pal.CARD)
         row.pack(anchor="w")
-        for card in sorted(self.ctl.hand, key=lambda c: c.value):
-            label = f"{card.value}\nfatigue" if card.exhaustion else str(card.value)
-            ui.FlatButton(
-                row, label, lambda c=card: self.on_card(c), style="warn" if card.exhaustion else "secondary",
-                size=14 if card.exhaustion else 22, padx=16 if card.exhaustion else 20, pady=14,
-            ).pack(side="left", padx=4)
+        for card in sorted(self.ctl.hand, key=lambda c: c.value):  # cartes blanches, comme en ligne
+            text = "A 2/9" if card.special == "attaque" else str(card.value)
+            caption = "fatigue" if card.exhaustion else "muscle" if card.special == "muscle" else ""
+            ui.PlayingCard(row, text, lambda c=card: self.on_card(c), fatigue=card.exhaustion, caption=caption).pack(
+                side="left", padx=(0, 10))
         tk.Label(
             frame, text=f"Pioche : {len(rider.draw_pile)} cartes   ·   Recyclage : {len(rider.recycle)} cartes",
             font=ui.font(10), bg=pal.CARD, fg=pal.MUTED,

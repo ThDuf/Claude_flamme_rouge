@@ -117,6 +117,35 @@ class FlatButton(tk.Label):
             self._command()
 
 
+CARD_FACE, CARD_FATIGUE, CARD_INK = "#f8fafc", "#94a3b8", "#0f172a"
+
+
+class PlayingCard(tk.Frame):
+    """Une carte de la main, comme dans la version en ligne : petite carte blanche (grise pour la fatigue) avec un
+    gros chiffre ; cliquable, le bord s'allume en rouge au survol."""
+
+    W, H = 64, 88
+
+    def __init__(self, parent, text: str, command, fatigue: bool = False, caption: str = ""):
+        face = CARD_FATIGUE if fatigue else CARD_FACE
+        super().__init__(parent, width=self.W, height=self.H, bg=face, highlightthickness=3,
+                         highlightbackground=face, highlightcolor=face, cursor="hand2")
+        self.pack_propagate(False)
+        self._face, self._command = face, command
+        number = tk.Label(self, text=text, font=font(26 if len(text) <= 2 else 15, True), bg=face, fg=CARD_INK,
+                          cursor="hand2")
+        number.pack(expand=True)
+        widgets = [self, number]
+        if caption:
+            small = tk.Label(self, text=caption, font=font(7, True), bg=face, fg="#334155", cursor="hand2")
+            small.pack(side="bottom", pady=(0, 5))
+            widgets.append(small)
+        for w in widgets:
+            w.bind("<ButtonRelease-1>", lambda _e: self._command())
+            w.bind("<Enter>", lambda _e: self.configure(highlightbackground=pal.ACCENT))
+            w.bind("<Leave>", lambda _e: self.configure(highlightbackground=self._face))
+
+
 class Tooltip:
     """Infobulle : `text` s'affiche près de la souris quand elle survole `widget` (et ses enfants)."""
 
