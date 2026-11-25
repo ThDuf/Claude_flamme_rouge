@@ -22,6 +22,7 @@ from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
 from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
 from flamme_rouge.boardview import FOLLOW_HEAD, FOLLOW_PELOTON, follow_view, jersey_primitives
+from flamme_rouge.iso import best_angle, projection
 from flamme_rouge.stage import MOUNTAIN, SPRINT, format_time
 from flamme_rouge.tour import GREEN, POLKA, YELLOW
 from flamme_rouge.boardview import podium_primitives, profile_primitives, weather_fx_primitives, map_weather_fx_primitives, map_transform, pan_view, zoom_view, BOARD_W, MAP_H, TEAM_TEXT, map_primitives, terrain_text
@@ -69,6 +70,7 @@ WINDOW_W, WINDOW_H = 1040, 985
 TOUR_PANEL_W = 230  # Grand Tour : largeur du panneau des jetons et des temps
 PANEL_PER_ROW = 4  # pastilles par ligne dans ce panneau
 SIDE_PANEL_W = 330  # ce panneau quand il est à droite de la carte (écran large)
+ROTATE_STEP = 30  # degrés : un clic sur ⟲ ou ⟳ en vue 3D
 CAMERA_ALL = "tout"
 CAMERA_CHOICES = [(CAMERA_ALL, "Tout le parcours"), (FOLLOW_PELOTON, "Zoom peloton"), (FOLLOW_HEAD, "Zoom tête de course")]
 
@@ -103,6 +105,8 @@ class App:
         self.view = None  # cadrage manuel (échelle, x, y) à la molette / au glissement ; None = cadrage automatique
         # caméra : "tout" (le parcours entier), "peloton" ou "tete" (suit ce groupe), "" (cadrage manuel)
         self.camera_var = tk.StringVar(value=CAMERA_ALL)
+        self.iso_var = tk.BooleanVar(value=True)  # vue 3D isométrique du plateau
+        self.iso_angle = None  # rotation de la vue 3D ; None = celle qui montre le parcours le plus grand
         self._drag = None  # (x, y, déplacé ?) pendant un glissement de la souris
         self._build()
         self.refresh()
@@ -169,8 +173,15 @@ class App:
         ui.FlatButton(bar, "＋", lambda: self.zoom_at(1.4), size=11, padx=12, pady=4).pack(side="left")
         ui.FlatButton(bar, "－", lambda: self.zoom_at(1 / 1.4), size=11, padx=12, pady=4).pack(side="left", padx=(4, 0))
         ui.Segmented(bar, CAMERA_CHOICES, self.camera_var, command=self.set_camera).pack(side="left", padx=(10, 0))
-        tk.Label(bar, text="molette = zoom · glisser = déplacer\nclic = passer l'animation", font=ui.font(8), bg=pal.BG,
-                 fg=pal.FAINT, justify="left").pack(side="left", padx=10)
+        # vue 3D isométrique, et rotation du plateau autour de la verticale
+        ui.Toggle(bar, "Vue 3D", self.iso_var, command=self.set_camera).pack(side="left", padx=(10, 0))
+        ui.FlatButton(bar, "⟲", lambda: self.rotate(-ROTATE_STEP), size=11, padx=9, pady=4).pack(side="left", padx=(4, 0))
+        ui.FlatButton(bar, "⟳", lambda: self.rotate(ROTATE_STEP), size=11, padx=9, pady=4).pack(side="left", padx=(2, 0))
+        help_mark = tk.Label(bar, text="?", font=ui.font(10, True), bg=pal.CARD, fg=pal.MUTED, padx=7, pady=2,
+                             cursor="question_arrow")
+        help_mark.pack(side="left", padx=8)
+        ui.Tooltip(help_mark, "Molette : zoom · glisser la carte : déplacer\nClic sur la carte : passer l'animation\n"
+                              "Vue 3D : le plateau en relief ; ⟲ ⟳ le font tourner")
         ui.Toggle(bar, "Mode secret", self.secret_var, command=self.refresh).pack(side="right")
         ui.Toggle(bar, "Animations", self.animate_var).pack(side="right")
 
@@ -247,14 +258,37 @@ class App:
 
     # ------------------------------------------------------------ zoom de la carte
 
+    def _proj(self):
+        """La projection de la vue 3D (None : carte plate vue du dessus)."""
+        if self.iso_var.get() is not True:
+            return None
+        if self.iso_angle is None:
+            self.iso_angle = best_angle(self.game.track, BOARD_W, MAP_H)
+        return projection(self.game.track, self.iso_angle)
+
+    def rotate(self, step: float) -> None:
+        """Tourne le plateau (vue 3D) ; le cadrage repart de la vue choisie (tout le parcours ou le suivi)."""
+        if self.iso_var.get() is not True:
+            self.iso_var.set(True)
+        self.iso_angle = ((self.iso_angle if self.iso_angle is not None else best_angle(self.game.track, BOARD_W, MAP_H))
+                          + step) % 360
+        if self.camera_var.get() == "":
+            self.camera_var.set(CAMERA_ALL)
+        self.set_camera()
+
     def _auto_view(self):
-        return map_transform(self.game)
+        return map_transform(self.game, proj=self._proj())
 
     def _focus_view(self):
         """Cadrage automatique, recentré sur le milieu des coureurs : point de départ des boutons ＋ et －."""
         scale, _cx, _cy = self._auto_view()
         squares = layout_squares(self.game.track)
-        points = [point_on_road(squares, r.position, r.lane) for r in self.game.riders] or [point_on_road(squares, 0, 0)]
+        spots = [(r.position, r.lane) for r in self.game.riders] or [(0, 0)]
+        proj = self._proj()
+        if proj is None:
+            points = [point_on_road(squares, p, l) for p, l in spots]
+        else:
+            points = [proj(point_on_road(squares, p, l), proj.z_at(p)) for p, l in spots]
         return scale, sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points)
 
     def zoom_at(self, factor: float, x=None, y=None) -> None:
@@ -287,7 +321,8 @@ class App:
         """Caméra de suivi : recadre sur le groupe suivi (appelé à chaque dessin de la carte)."""
         which = self.camera_var.get()
         if which in (FOLLOW_PELOTON, FOLLOW_HEAD):
-            self.view = follow_view(self.game, which)  # None (plus personne en course) : tout le parcours
+            # None (plus personne en course) : tout le parcours
+            self.view = follow_view(self.game, which, proj=self._proj())
 
     def on_press(self, event) -> None:
         self._drag = [event.x, event.y, False]
@@ -487,6 +522,7 @@ class App:
             self.ctl.current_rider,
             positions=positions,
             view=self.view,
+            proj=self._proj(),
         )
         self._paint(self.board, shapes)
         self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
@@ -505,7 +541,7 @@ class App:
         ui.paint(self.profile, weather_fx_primitives(self.game.track, self.game.weather, BOARD_W, PROFILE_H, t), tags=("fx",))
         self.board.delete("fx")
         if not self._podium_visible():
-            ui.paint(self.board, map_weather_fx_primitives(self.game, t, view=self.view), tags=("fx",))
+            ui.paint(self.board, map_weather_fx_primitives(self.game, t, view=self.view, proj=self._proj()), tags=("fx",))
         if self.fx_job is None and self.animate_var.get() is True:
             self.fx_job = self.root.after(self.WEATHER_FX_MS, self._fx_tick)
 
