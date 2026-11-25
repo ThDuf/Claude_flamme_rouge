@@ -123,10 +123,11 @@ canvas { display: block; width: 100%; height: auto; }
 .deck { margin-top: 14px; }
 .deck-title { font-weight: 600; margin-bottom: 8px; }
 .deck-cards { display: flex; flex-wrap: wrap; gap: 6px; }
-.mini { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 44px; height: 58px;
-        background: #f8fafc; color: #0f172a; border-radius: 6px; }
-.mini b { font-size: 18px; line-height: 1.1; }
-.mini span { font-size: 12px; font-weight: 600; color: #475569; }
+.deck-cards { gap: 6px; }
+.mini-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mini { display: flex; align-items: center; justify-content: center; width: 42px; height: 58px;
+        background: #f8fafc; color: #0f172a; border-radius: 6px; font-size: 28px; font-weight: 800; line-height: 1; }
+.mini-count { font-size: 13px; font-weight: 700; color: var(--muted); }
 .mini.fatigue { background: #94a3b8; }
 
 /* écran partagé (?watch=1) : le plateau pour tout le monde, sans rien de privé ni bouton de jeu */

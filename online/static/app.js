@@ -784,8 +784,9 @@ function renderDecks(race) {
       ` ${d.kind === "rouleur" ? "Rouleur" : "Sprinteur"}`, el("span", { class: "muted small" }, ` · ${total} cartes`)));
     const cards = el("div", { class: "deck-cards" });
     for (const c of d.cards) {
-      cards.append(el("div", { class: "mini" + (c.fatigue ? " fatigue" : "") },
-        el("b", {}, c.label), el("span", {}, "×" + c.count)));
+      cards.append(el("div", { class: "mini-wrap", title: `${c.count} carte${c.count > 1 ? "s" : ""} ${c.label}` },
+        el("div", { class: "mini" + (c.fatigue ? " fatigue" : "") }, c.label),
+        el("span", { class: "mini-count" }, "×" + c.count)));
     }
     box.append(cards);
     body.append(box);
