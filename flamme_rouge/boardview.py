@@ -22,6 +22,7 @@ from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
 from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, NORMAL, SUPPLY, Track
 from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
 from .stage import MOUNTAIN as TOKEN_MOUNTAIN, TokenStack, timing_table
+from .iso import ISO_BASE, Projection
 
 from . import palette as pal
 from .palette import BEYOND_FILL, LABEL_ON_FILL, TEAM_FILL, TEAM_TEXT, TERRAIN_FILL, TERRAIN_SYMBOL_COLOR
@@ -168,12 +169,16 @@ MAX_SCALE = 140.0
 
 
 def map_transform(
-    game: Game, zoom: bool = False, window: Optional[tuple[int, int]] = None, width: int = BOARD_W, height: int = MAP_H
+    game: Game, zoom: bool = False, window: Optional[tuple[int, int]] = None, width: int = BOARD_W, height: int = MAP_H,
+    proj: Optional[Projection] = None,
 ) -> tuple[float, float, float]:
-    """Cadrage automatique de la carte : (échelle en pixels par case, x et y du centre dans le monde)."""
+    """Cadrage automatique de la carte : (échelle en pixels par case, x et y du centre dans le monde).
+    `proj` : vue 3D isométrique (iso.Projection) ; le cadrage se fait alors sur la route projetée, socle compris."""
     squares = layout_squares(game.track)
     first, last = window or (map_window(game) if zoom else full_window(game))
     pts = [p for s in range(first, last + 1) for p in squares[s].corners]
+    if proj is not None:
+        pts = [proj(p) for p in pts] + [proj(p, ISO_BASE) for p in pts]
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
     bw, bh = max(xs) - min(xs), max(ys) - min(ys)
     scale = min(
@@ -388,19 +393,33 @@ def _timing_tile(prims: list, squares, track: Track, shown, tr, scale: float) ->
         prims.append(("text", x, y, f"+{seconds}", TIMING_TILE_TEXT, font, True, "center"))
 
 
-def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view):
-    """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels)."""
+def _map_frame(game: Game, zoom: bool, window, width: int, height: int, view, proj: Optional[Projection] = None):
+    """Cadrage de la carte : (cases, première et dernière case dessinées, échelle, passage monde -> pixels).
+
+    En vue 3D (`proj`), `tr(p)` pose le point sur la route (à son altitude) ; `tr.at(p, z)` le pose à l'altitude
+    `z` (coureurs, murs du socle) ; `tr.proj` est la projection (None sur la carte plate)."""
     squares = layout_squares(game.track)
     first, last = window or (map_window(game) if zoom else full_window(game))
     if view is None:
-        scale, mx, my = map_transform(game, zoom, window, width, height)
+        scale, mx, my = map_transform(game, zoom, window, width, height, proj)
     else:
         scale, mx, my = view
         first, last = 0, min(len(squares) - 1, max([full_window(game)[1]] + [r.position for r in game.riders]))
 
-    def tr(p) -> tuple[float, float]:
-        return (width / 2 + (p[0] - mx) * scale, height / 2 - (p[1] - my) * scale)
+    def screen(u: float, v: float) -> tuple[float, float]:
+        return (width / 2 + (u - mx) * scale, height / 2 - (v - my) * scale)
 
+    if proj is None:
+        def tr(p, _square=None) -> tuple[float, float]:
+            return screen(p[0], p[1])
+
+        tr.at = lambda p, _z: tr(p)
+    else:
+        def tr(p, square=None) -> tuple[float, float]:  # `square` : la case du point, si on la connaît
+            return screen(*proj(p, square=square))
+
+        tr.at = lambda p, z: screen(*proj(p, z))
+    tr.proj = proj
     return squares, first, last, scale, tr
 
 
@@ -424,13 +443,14 @@ def map_weather_fx_primitives(
     width: int = BOARD_W,
     height: int = MAP_H,
     view: Optional[tuple[float, float, float]] = None,
+    proj: Optional[Projection] = None,
 ) -> list[tuple]:
     """Animation de la météo sur la carte, à l'instant `t` (en secondes), dans le même cadrage que map_primitives.
 
     Pluie : gouttes qui tombent et ronds dans l'eau. Vent arrière / de face : traits qui filent le long de la route,
     vers l'arrivée ou vers le départ. Vent de travers : rafales qui traversent la route sur trois plans (les plus
     proches plus grandes, plus vives et plus rapides) pour donner de la profondeur. Beau temps : un petit soleil."""
-    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view)
+    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view, proj)
     px = max(scale, 6.0)  # pixels par case, pour dimensionner les effets
     prims: list[tuple] = []
 
@@ -503,19 +523,26 @@ def rider_token_size(scale: float) -> tuple[float, int]:
     return radius, 8 if radius < 9 else 9 if radius < 11 else 11 if radius < 16 else 14
 
 
-def road_geometry(game: Game, view=None, width: int = BOARD_W, height: int = MAP_H) -> dict:
+def road_geometry(game: Game, view=None, width: int = BOARD_W, height: int = MAP_H,
+                  proj: Optional[Projection] = None) -> dict:
     """La route en pixels pour un navigateur qui anime lui-même coureurs et météo, dans le cadrage de
     map_primitives : pour chaque case, le milieu de son bord droit et de son bord gauche, et son nombre de files.
     Le centre de la file `l` d'une case est alors droite + (l + 0,5) / files × (gauche − droite), comme
     `SquareGeom.lane_center` ; entre deux cases, on mélange en ligne droite, comme `point_on_road`."""
-    squares, first, last, scale, tr = _map_frame(game, False, None, width, height, view)
+    squares, first, last, scale, tr = _map_frame(game, False, None, width, height, view, proj)
     rows = []
-    for sq in squares:
-        (rx, ry), (lx, ly) = tr(((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2)), \
-            tr(((sq.lb[0] + sq.lf[0]) / 2, (sq.lb[1] + sq.lf[1]) / 2))
+    for s, sq in enumerate(squares):
+        right = ((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2)
+        left = ((sq.lb[0] + sq.lf[0]) / 2, (sq.lb[1] + sq.lf[1]) / 2)
+        if proj is not None:  # vue 3D : les deux bords à l'altitude du milieu de la case (la projection est affine)
+            z = proj.z_at(s)
+            (rx, ry), (lx, ly) = tr.at(right, z), tr.at(left, z)
+        else:
+            (rx, ry), (lx, ly) = tr(right), tr(left)
         rows.append([rx, ry, lx, ly, sq.lanes])
     radius, font = rider_token_size(scale)
-    return {"road": rows, "first": first, "last": last, "scale": scale, "radius": radius, "font": font}
+    return {"road": rows, "first": first, "last": last, "scale": scale, "radius": radius, "font": font,
+            "iso": proj is not None}
 
 
 def profile_geometry(track: Track, width: int, height: int) -> dict:
@@ -537,8 +564,12 @@ def map_primitives(
     height: int = MAP_H,
     view: Optional[tuple[float, float, float]] = None,
     draw_riders: bool = True,
+    proj: Optional[Projection] = None,
 ) -> list[tuple]:
     """La route en 2D, virages compris : le parcours entier, ou un zoom qui suit le peloton.
+
+    `proj` (iso.Projection) : vue 3D isométrique ; la route a des côtés jusqu'au sol, les cases sont dessinées du
+    fond vers l'avant et les coureurs sont de petits cyclistes de profil, tournés vers l'arrivée.
 
     `view` = (échelle, x, y) impose un cadrage manuel (zoom à la molette, glissement) ; sinon cadrage automatique.
     `positions` donne, pour une animation, la position intermédiaire de certains coureurs :
@@ -547,10 +578,10 @@ def map_primitives(
     """
     track = game.track
     finish = len(track)
-    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view)
+    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view, proj)
 
-    def flat(points) -> list[float]:
-        return [c for p in points for c in tr(p)]
+    def flat(points, square=None) -> list[float]:
+        return [c for p in points for c in tr(p, square)]
 
     number_every = 1 if scale >= 15 else 5  # sur une grande carte, on ne numérote qu'une case sur cinq
     prims: list[tuple] = [("rect", 0, 0, width, height, pal.GRASS, "", 0)]
@@ -565,26 +596,32 @@ def map_primitives(
     shown = [s for s in range(first, last + 1) if visible(s)]
     altitudes = road_altitudes(track, len(squares))
     top = max(altitudes) if altitudes else 0.0
-    _relief_shadows(prims, squares, altitudes, shown, tr, scale)
-    for s in shown:
+    if proj is None:
+        _relief_shadows(prims, squares, altitudes, shown, tr, scale)
+        order = shown
+    else:  # vue 3D : du fond vers l'avant, chaque case cache celles qui sont derrière elle
+        order = sorted(shown, key=lambda s: -proj.depth(squares[s].center))
+    for s in order:
         sq = squares[s]
         beyond = s >= finish
         kind = None if beyond else track.kind(s)
         fill = _relief_fill(BEYOND_FILL if beyond else TERRAIN_FILL[kind], altitudes[s], top)
         surface = "" if beyond else track.surface(s)
-        prims.append(("poly", flat(sq.outline), _surface_fill(fill, surface), pal.ROAD_OUTLINE, 1))
+        if proj is not None:
+            _iso_walls(prims, sq, proj.edges[s], proj.edges[s + 1], proj, tr, _surface_fill(fill, surface))
+        prims.append(("poly", flat(sq.outline, s), _surface_fill(fill, surface), pal.ROAD_OUTLINE, 1))
         if surface == COBBLES and scale >= 10:
             _cobble_stones(prims, sq, tr, scale)
         # lignes blanches sur les bords de la route (en arc dans les virages)
         for path in (sq.left_path, sq.right_path):
-            prims.append(("path", flat(path), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
+            prims.append(("path", flat(path, s), pal.ROAD_EDGE, 2 if scale >= 12 else 1))
         # traits entre les files (aucun sur les pavés à une file, deux au ravitaillement)
         for path in sq.lane_lines:
-            prims.append(("path", flat(path), pal.LANE_LINE, 1))
-        cx, cy = tr(sq.center)
+            prims.append(("path", flat(path, s), pal.LANE_LINE, 1))
+        cx, cy = tr(sq.center, s)
         if s % number_every == 0:
             # numéro de case, posé à l'extérieur de la route (côté droit)
-            rx, ry = tr(((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2))
+            rx, ry = tr(((sq.rb[0] + sq.rf[0]) / 2, (sq.rb[1] + sq.rf[1]) / 2), s)
             ox, oy = rx - cx, ry - cy
             norm = max((ox * ox + oy * oy) ** 0.5, 1e-6)
             prims.append(("text", rx + ox / norm * 11, ry + oy / norm * 11, str(s), pal.SQUARE_NUMBER, 8, False, "center"))
@@ -615,9 +652,23 @@ def map_primitives(
         where.update(positions)
     radius, font_size = rider_token_size(scale)
     crash_labels: set[int] = set()
-    for rider in sorted(game.riders, key=lambda r: where[r][0]):  # ceux de derrière d'abord, devant par-dessus
+    if proj is None:
+        riders = sorted(game.riders, key=lambda r: where[r][0])  # ceux de derrière d'abord, devant par-dessus
+    else:  # vue 3D : du plus loin du spectateur au plus proche
+        riders = sorted(game.riders, key=lambda r: -proj.depth(point_on_road(squares, *where[r])))
+    for rider in riders:
         progress, lane = where[rider]
-        cx, cy = tr(point_on_road(squares, progress, lane))
+        if proj is not None:
+            cx, cy = tr.at(point_on_road(squares, progress, lane), proj.z_at(progress))
+            if not (rider.crashed and rider not in (positions or {})):
+                # sens de la course à l'écran, pour que le cycliste regarde vers l'arrivée
+                ax, _ay = tr.at(point_on_road(squares, progress - 0.3, lane), proj.z_at(progress - 0.3))
+                bx, _by = tr.at(point_on_road(squares, progress + 0.3, lane), proj.z_at(progress + 0.3))
+                _iso_cyclist(prims, cx, cy, radius, font_size, rider, rider is current, 1 if bx >= ax else -1)
+                _rider_extras(prims, game, rider, cx, cy - radius * 0.95 * CYCLIST_HEIGHT, radius)
+                continue
+        else:
+            cx, cy = tr(point_on_road(squares, progress, lane))
         is_current = rider is current
         prims.append(("oval", cx - radius + 1.5, cy - radius + 3, cx + radius + 1.5, cy + radius + 3, pal.SHADOW, "", 0))
         if is_current:  # halo doré autour du coureur qui choisit
@@ -633,13 +684,99 @@ def map_primitives(
             continue
         prims.append(("oval", cx - radius, cy - radius, cx + radius, cy + radius, TEAM_FILL[rider.team], pal.RIDER_OUTLINE, 2))
         prims.append(("text", cx, cy, rider.name, LABEL_ON_FILL[rider.team], font_size, True, "center"))
-        jersey = getattr(game, "jerseys", {}).get(rider)
-        if jersey:
-            prims.extend(worn_jersey_primitives(cx, cy, radius, jersey))
-        minutes = getattr(game, "minutes", {}).get(rider, 0) if getattr(game, "tour", False) else 0
-        if minutes:  # Grand Tour : jetons Temps d'une minute déjà pris, en bas à gauche de la pastille
-            prims.extend(time_token_primitives(cx - radius * 0.85, cy + radius * 0.85, max(6.0, radius * 0.55), minutes))
+        _rider_extras(prims, game, rider, cx, cy, radius)
     return prims
+
+
+def _rider_extras(prims: list, game: Game, rider: Rider, cx: float, cy: float, radius: float) -> None:
+    """Grand Tour : maillot porté (en haut à droite) et jetons Temps (en bas à gauche) autour de (cx, cy)."""
+    jersey = getattr(game, "jerseys", {}).get(rider)
+    if jersey:
+        prims.extend(worn_jersey_primitives(cx, cy, radius, jersey))
+    minutes = getattr(game, "minutes", {}).get(rider, 0) if getattr(game, "tour", False) else 0
+    if minutes:
+        prims.extend(time_token_primitives(cx - radius * 0.85, cy + radius * 0.85, max(6.0, radius * 0.55), minutes))
+
+
+ISO_WALL_SHADE = 0.42  # assombrissement des côtés du plateau (vue 3D)
+
+
+def _iso_walls(prims: list, sq, z_back: float, z_front: float, proj: Projection, tr, fill: str) -> None:
+    """Vue 3D : les côtés visibles d'une case, de la route jusqu'au sol, plus sombres que le dessus. Ils suivent
+    l'arc des virages ; la lumière vient de la gauche (côtés tournés vers la droite plus sombres)."""
+    cx, cy = sq.center
+    sides = [list(sq.left_path) or [sq.lb, sq.lf], list(sq.right_path) or [sq.rb, sq.rf]]
+    faces = []
+    for path in sides:
+        n = len(path) - 1
+        for i in range(n):
+            faces.append((path[i], z_back + (z_front - z_back) * i / n, path[i + 1],
+                          z_back + (z_front - z_back) * (i + 1) / n))
+    faces.append((sq.lb, z_back, sq.rb, z_back))  # bord arrière
+    faces.append((sq.rf, z_front, sq.lf, z_front))  # bord avant
+    for a, za, b, zb in faces:
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        nx, ny = mx - cx, my - cy  # vers l'extérieur de la case
+        nu, nw = proj.ground((nx, ny))
+        if nw >= 0:  # tourné vers le fond : caché
+            continue
+        length = max((nu * nu + nw * nw) ** 0.5, 1e-9)
+        shade = ISO_WALL_SHADE + 0.18 * (nu / length)  # côté droit plus sombre, côté gauche plus clair
+        color = _mix(fill, "#000000", shade)
+        pts = [*tr.at(a, za), *tr.at(b, zb), *tr.at(b, ISO_BASE), *tr.at(a, ISO_BASE)]
+        prims.append(("poly", pts, color, color, 1))
+
+
+CYCLIST_WHEEL, CYCLIST_FRAME, CYCLIST_SKIN = "#0b1220", "#e5e7eb", "#f1c27d"
+CYCLIST_HEIGHT = 2.0  # hauteur du cycliste (du sol au haut du casque), en « unités » u (voir _iso_cyclist)
+
+
+def _iso_cyclist(prims: list, cx: float, cy: float, radius: float, font_size: int, rider: Rider, current: bool,
+                 facing: int = 1) -> None:
+    """Vue 3D : le coureur en petit cycliste de profil, sur son vélo, penché vers le guidon. (cx, cy) est le point
+    de contact avec la route ; `facing` = 1 s'il roule vers la droite de l'écran, −1 vers la gauche.
+    Maillot et casque aux couleurs de l'équipe ; son nom sur une étiquette au-dessus de la tête."""
+    u = radius * 0.95
+    body = TEAM_FILL[rider.team]
+    stroke = max(1.0, u * 0.16)
+
+    def at(x: float, y: float) -> tuple[float, float]:  # repère du cycliste : x vers l'avant, y vers le haut
+        return cx + facing * x * u, cy - y * u
+
+    def line(a, b, color, width) -> None:
+        prims.append(("line", *at(*a), *at(*b), color, width))
+
+    # ombre et halo sur la route
+    prims.append(("oval", cx - u * 1.2 + 2, cy - u * 0.28 + 1, cx + u * 1.2 + 2, cy + u * 0.28 + 1, pal.SHADOW, "", 0))
+    if current:
+        prims.append(("oval", cx - u * 1.5, cy - u * 0.45, cx + u * 1.5, cy + u * 0.45, "", pal.CURRENT_RING, 3))
+    # roues
+    wr = 0.42
+    for hub in (-0.58, 0.58):
+        x, y = at(hub, wr)
+        prims.append(("oval", x - wr * u, y - wr * u, x + wr * u, y + wr * u, "", CYCLIST_WHEEL, max(1.5, stroke)))
+    # cadre : base arrière, tube de selle, tube horizontal, fourche, guidon
+    rear, bb, seat, head, front = (-0.58, wr), (-0.05, wr), (-0.22, 1.0), (0.42, 1.0), (0.58, wr)
+    for a, b in ((rear, bb), (bb, seat), (seat, head), (head, front), (rear, seat), (bb, head)):
+        line(a, b, CYCLIST_FRAME, max(1.0, stroke * 0.7))
+    line(head, (0.52, 1.12), CYCLIST_FRAME, max(1.0, stroke * 0.7))  # potence
+    # le coureur : jambe, buste penché, bras, tête casquée
+    hip, knee, pedal = (-0.2, 1.08), (0.12, 0.78), (-0.02, 0.3)
+    shoulder, hand = (0.3, 1.45), (0.52, 1.12)
+    line(hip, knee, _mix(body, "#000000", 0.45), stroke * 1.1)
+    line(knee, pedal, _mix(body, "#000000", 0.45), stroke)
+    line(hip, shoulder, body, stroke * 2.2)  # buste (maillot)
+    line(shoulder, hand, body, stroke * 1.1)
+    hx, hy = at(0.45, 1.66)
+    hr = 0.2 * u
+    prims.append(("oval", hx - hr, hy - hr, hx + hr, hy + hr, CYCLIST_SKIN, "", 0))
+    prims.append(("poly", [hx - hr * 1.1, hy - hr * 0.1, hx - hr * 0.6, hy - hr * 1.15, hx + hr * 0.6, hy - hr * 1.15,
+                           hx + hr * 1.1, hy - hr * 0.1], body, _mix(body, "#000000", 0.4), 1))  # casque
+    # étiquette du nom, au-dessus du casque
+    ty = cy - (CYCLIST_HEIGHT + 0.25) * u - font_size * 0.6
+    tw = max(font_size * 1.6, u * 1.1)
+    prims.append(("rect", cx - tw, ty - font_size * 0.75, cx + tw, ty + font_size * 0.75, body, pal.RIDER_OUTLINE, 1))
+    prims.append(("text", cx, ty, rider.name, LABEL_ON_FILL[rider.team], max(font_size - 1, 7), True, "center"))
 
 
 WEATHER_PANEL = (0.12, 0.5)  # bande du panneau météo : de 0,12 à 0,5 case à l'extérieur du bord gauche
@@ -899,10 +1036,10 @@ def follow_window(game: Game, which: str) -> Optional[tuple[int, int]]:
     return max(0, min(first, total - FOLLOW_MIN_SQUARES)), min(last, total - 1)
 
 
-def follow_view(game: Game, which: str, width: int = BOARD_W, height: int = MAP_H):
+def follow_view(game: Game, which: str, width: int = BOARD_W, height: int = MAP_H, proj: Optional[Projection] = None):
     """Cadrage (échelle, x, y) qui suit le peloton ou la tête de course ; None si personne n'est en course."""
     window = follow_window(game, which)
-    return None if window is None else map_transform(game, window=window, width=width, height=height)
+    return None if window is None else map_transform(game, window=window, width=width, height=height, proj=proj)
 
 
 def group_labels(riders: Sequence[Rider]) -> list[tuple[str, list[Rider]]]:
