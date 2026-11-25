@@ -49,5 +49,17 @@ def deck_text(rider: Rider) -> str:
     return "\n".join(lines)
 
 
+def deck_summary(cards) -> list[dict]:
+    """Un deck en piles de cartes identiques, de la plus petite à la plus grande : [{label, count, fatigue}]
+    (affichage « deck de départ » : une petite carte par valeur, avec le nombre d'exemplaires)."""
+    counts = Counter((c.value, c.exhaustion, str(c)) for c in cards)
+    return [{"label": label, "count": n, "fatigue": fatigue} for (_v, fatigue, label), n in sorted(counts.items())]
+
+
+def whole_deck(rider: Rider) -> list[Card]:
+    """Toutes les cartes du coureur encore en jeu : pioche, main en cours et recyclage."""
+    return rider.draw_pile + rider.recycle + rider.hand
+
+
 def all_decks_text(game: Game) -> str:
     return "\n\n".join(deck_text(r) for r in game.riders)

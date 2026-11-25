@@ -261,3 +261,20 @@ def test_shared_screen_sees_the_race_but_no_private_information():
     assert [p["name"] for p in screen["players"]] == ["Alice", "Bob"]  # l'écran n'est pas un joueur du salon
     with pytest.raises(OnlineError):  # sans jeton, on ne peut rien jouer
         call(api, "/api/advance", code=code, watch=1, phase="movement")
+
+
+def test_online_3d_view_is_an_option():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+
+    def race(**query):
+        return api.handle("GET", "/api/state", {"code": code, "token": token, **query}, {})["race"]
+
+    flat = race()  # par défaut : la carte 2D
+    assert flat["iso_angle"] is None and flat["geo"]["iso"] is False
+    auto = race(iso="auto")
+    assert auto["iso_angle"] % 90 in (30, 45, 60) and auto["geo"]["iso"] is True
+    assert race(iso="390")["iso_angle"] == 30  # 390° = 30°
+    assert race(iso="abc")["iso_angle"] is None  # illisible : carte 2D, sans erreur

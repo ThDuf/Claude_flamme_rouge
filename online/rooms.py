@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 import secrets
-from collections import Counter
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,6 +27,8 @@ from flamme_rouge.boardview import (
     profile_primitives, road_geometry, track_preview_primitives,
 )
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
+from flamme_rouge.decks import deck_summary  # noqa: F401 (aussi importé depuis ce module)
+from flamme_rouge.iso import best_angle, projection
 from flamme_rouge.controller import BREAKAWAY, CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
 from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
 from flamme_rouge.extensions import EXTENSIONS, PELOTON
@@ -59,10 +60,6 @@ ACTION_TEXT = {
 }
 
 
-def deck_summary(cards) -> list[dict]:
-    """Un deck en piles de cartes identiques, de la plus petite à la plus grande : [{label, count, fatigue}]."""
-    counts = Counter((c.value, c.exhaustion, str(c)) for c in cards)
-    return [{"label": label, "count": n, "fatigue": fatigue} for (_v, fatigue, label), n in sorted(counts.items())]
 
 
 class OnlineError(Exception):
@@ -85,6 +82,19 @@ def online_choices() -> list[Choice]:
         key = f"mine:{c.label}" if c.group == GROUP_MINE else c.key
         out.append(Choice(key, c.label, c.group, c.track, c.tiles))
     return out
+
+
+def parse_iso(text):
+    """« auto » ou un angle (degrés, arrondi au degré) pour la vue 3D ; None (vide ou illisible) : carte plate."""
+    if not text:
+        return None
+    if str(text) == "auto":
+        return "auto"
+    try:
+        angle = float(text)
+    except ValueError:
+        return None
+    return round(angle) % 360 if math.isfinite(angle) else None
 
 
 def parse_view(text) -> Optional[tuple]:
@@ -341,7 +351,7 @@ class Room:
 
     # ------------------------------------------------------------------ état envoyé au navigateur
 
-    def state(self, player: Player, camera: str = "", view: Optional[tuple] = None) -> dict:
+    def state(self, player: Player, camera: str = "", view: Optional[tuple] = None, iso=None) -> dict:
         self.touched = time.monotonic()
         base = {
             "version": self.version,
@@ -352,7 +362,7 @@ class Room:
         if self.game is None:
             base["lobby"] = self._lobby_state()
         else:
-            base["race"] = self._race_state(player, camera, view)
+            base["race"] = self._race_state(player, camera, view, iso)
         return base
 
     def _lobby_state(self) -> dict:
@@ -380,23 +390,30 @@ class Room:
             "preview_size": [PREVIEW_W, PREVIEW_H, PREVIEW_PROFILE_H],
         }
 
-    def _race_state(self, player: Player, camera: str, view: Optional[tuple] = None) -> dict:
-        """`view` : cadrage libre (échelle, x, y) choisi à la souris dans le navigateur ; sinon la caméra."""
+    def _race_state(self, player: Player, camera: str, view: Optional[tuple] = None, iso=None) -> dict:
+        """`view` : cadrage libre (échelle, x, y) choisi à la souris dans le navigateur ; sinon la caméra.
+        `iso` : vue 3D isométrique — None (carte plate), "auto" (la rotation qui montre le parcours le plus grand)
+        ou un angle en degrés."""
         g, ctl = self.game, self.ctl
         rider = ctl.current_rider
-        key = ("race", view) if view is not None else ("race", camera)
+        angle = None
+        if iso is not None:
+            angle = best_angle(g.track, BOARD_W, MAP_H) if iso == "auto" else float(iso) % 360
+        proj = projection(g.track, angle) if angle is not None else None
+        key = ("race", view if view is not None else camera, angle)
         if key not in self._cache:  # la même image pour tous ceux qui ont le même cadrage
             if len(self._cache) > MAX_CACHED_VIEWS:  # beaucoup de zooms différents : on repart de zéro
                 self._cache.clear()
             if view is None:
-                view = follow_view(g, camera) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
+                view = follow_view(g, camera, proj=proj) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
             shared = {
-                "view": list(view or map_transform(g)),  # le cadrage utilisé : point de départ des zooms
-                "map": map_primitives(g, rider, view=view),
+                "view": list(view or map_transform(g, proj=proj)),  # le cadrage utilisé : point de départ des zooms
+                "iso_angle": angle,
+                "map": map_primitives(g, rider, view=view, proj=proj),
                 "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather),
                 # pour les animations du navigateur : la route sans coureurs, sa géométrie, celle du profil
-                "map_base": map_primitives(g, view=view, draw_riders=False),
-                "geo": road_geometry(g, view),
+                "map_base": map_primitives(g, view=view, draw_riders=False, proj=proj),
+                "geo": road_geometry(g, view, proj=proj),
                 "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
                 "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane}
                            for r in g.riders],
