@@ -71,6 +71,17 @@ function setAccent(team) {
   }
 }
 
+// Même écran : l'interface prend la couleur de l'équipe dont la main est à l'écran (celle qui choisit) ;
+// entre deux choix, ou dans le salon, celle de l'équipe principale de l'appareil.
+function accentTeam(state) {
+  if (session.watch || !state.me) return null;
+  if (state.race && state.me.teams && state.me.teams.length > 1) {
+    const team = activeTeam(state.race);
+    if (team != null) return team;
+  }
+  return state.me.team;
+}
+
 async function enter(code, token) {
   session.code = code;
   session.token = token;
@@ -148,7 +159,7 @@ async function poll() {
 }
 
 function render(state, previousVersion, hadRace) {
-  setAccent(session.watch || !state.me ? null : state.me.team);
+  setAccent(accentTeam(state));
   if (state.lobby) {
     session.anim = null;
     session.view = null; // le prochain parcours repart en vue complète
@@ -437,7 +448,7 @@ async function seatAction(team, options = {}) {
 }
 
 // ------------------------------------------------------------------ même écran, main cachée
-// Plusieurs équipes jouées sur cet appareil : avec l'option « main cachée », on ne montre les cartes que d'une
+// Plusieurs équipes jouées sur cet appareil : on ne montre les cartes que d'une
 // équipe à la fois, après un écran « passe l'appareil ». Toujours actif dès qu'un appareil tient deux équipes.
 
 function secretActive(state) {
