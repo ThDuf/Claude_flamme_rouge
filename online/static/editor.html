@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flamme Rouge · éditeur de parcours</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="logo">FLAMME <span>ROUGE</span></div>
+    <div class="subtitle">Éditeur de parcours · assemble les tuiles comme dans la boîte</div>
+    <a class="room-chip" href="/">⟵ Retour au jeu</a>
+  </header>
+
+  <main class="screen editor">
+    <div class="editor-grid">
+      <!-- 1. la palette des tuiles de la boîte -->
+      <section class="card">
+        <h3>1 · Choisis une tuile de la boîte</h3>
+        <div class="segmented" id="sides"></div>
+        <div id="palette" class="palette"></div>
+        <p class="muted small">Double-clic : pose la tuile après la sélection (ou à la fin).</p>
+        <h3>2 · Place-la</h3>
+        <div class="row gap wrap">
+          <button class="primary" id="append">À la fin</button>
+          <button id="insert">Après la sélection</button>
+          <button id="replace">Remplacer</button>
+        </div>
+      </section>
+
+      <!-- la liste des tuiles du parcours -->
+      <section class="card">
+        <h3>Parcours (départ → arrivée)</h3>
+        <ol id="plan" class="plan-list"></ol>
+        <div class="muted small">Tuile sélectionnée</div>
+        <div class="row gap wrap">
+          <button id="up">◀ Vers le départ</button>
+          <button id="down">Vers l'arrivée ▶</button>
+        </div>
+        <div class="row gap wrap plan-more">
+          <button id="remove">Supprimer</button>
+          <button id="undo">↶ Annuler</button>
+          <button id="clear">Tout effacer</button>
+        </div>
+      </section>
+
+      <!-- l'aperçu -->
+      <section class="card">
+        <h3>Aperçu</h3>
+        <canvas id="preview" width="700" height="470"></canvas>
+        <canvas id="profile" width="700" height="110"></canvas>
+      </section>
+    </div>
+
+    <section class="card editor-bottom">
+      <div id="summary" class="editor-summary"></div>
+      <div id="issues" class="issues"></div>
+      <div class="row gap wrap">
+        <label class="row gap">Ouvrir <select id="open"></select></label>
+        <button id="import">Importer un fichier…</button>
+        <input type="file" id="import-file" accept=".json,application/json" class="hidden">
+        <button id="download">Télécharger le fichier</button>
+        <span class="spacer"></span>
+        <span id="save-box" class="row gap hidden">
+          <input id="save-name" maxlength="40" placeholder="Nom du parcours">
+          <button class="primary" id="save">Enregistrer dans « Mes parcours »</button>
+        </span>
+      </div>
+      <p id="save-note" class="muted small"></p>
+      <p class="error" id="editor-error"></p>
+    </section>
+  </main>
+
+  <script src="draw.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

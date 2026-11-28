@@ -170,3 +170,34 @@ body.tv .board { max-width: max(640px, calc((100vh - 230px) * 1000 / 530)); }
 .tour-final { margin-bottom: 14px; }
 .tour-final .winner { font-size: 22px; font-weight: 800; margin-top: 10px; }
 #tour-notes { margin: 4px 0 6px; line-height: 1.5; }
+
+/* Éditeur de parcours */
+a.room-chip { color: var(--text); text-decoration: none; }
+.editor h3 { margin: 0 0 8px; font-size: 15px; }
+.editor-grid { display: grid; grid-template-columns: auto minmax(230px, 300px) 1fr; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .editor-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .editor-grid { grid-template-columns: 1fr; } }
+.editor .segmented { margin-bottom: 8px; flex-wrap: wrap; }
+.palette { display: grid; grid-template-columns: repeat(3, 100px); gap: 4px; margin-bottom: 4px; }
+.tile-card { padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; line-height: 0; }
+.tile-card canvas { width: 96px; height: 50px; }
+.tile-card.picked { border-color: var(--accent); }
+.tile-card.used { opacity: .55; }
+.tile-card:hover:not(:disabled) { background: none; border-color: var(--border); }
+.tile-card.picked:hover:not(:disabled) { border-color: var(--accent); }
+.plan-list { margin: 0 0 10px; padding: 4px 0 4px 32px; max-height: 430px; overflow-y: auto; background: var(--panel);
+             border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+.plan-list li { padding: 3px 6px; cursor: pointer; border-radius: 4px; }
+.plan-list li:hover { background: var(--card-hi); }
+.plan-list li.selected { background: var(--accent); color: #fff; }
+.plan-more { margin-top: 6px; }
+.editor #preview { background: #1f5a3b; border-radius: 6px; }
+.editor-bottom { margin-top: 14px; }
+.editor-summary { font-weight: 700; margin-bottom: 6px; }
+.issues { margin-bottom: 10px; font-size: 14px; }
+.issues .error { color: #ff7b7d; }
+.issues .warning { color: #fbbf24; }
+.issues .ok { color: var(--good); }
+.spacer { flex: 1; }
+#save-name { width: 220px; }
+.editor-link { margin-top: 8px; }

@@ -64,7 +64,8 @@ téléphone qui rejoint avec le code.
 
 - Le serveur tourne chez Render, pas sur ton PC : ton adresse IP n'est pas montrée et aucun port n'est ouvert
   sur ta box.
-- Il ne sert que trois fichiers (`online/static`) et l'API du jeu : aucun accès au reste du dépôt.
+- Il ne sert que les pages du jeu et de l'éditeur (`online/static`) et l'API du jeu : aucun accès au reste du dépôt ;
+  sur Render, l'éditeur n'écrit aucun fichier.
 - Toute personne qui a le lien peut ouvrir la page ; pour entrer dans une partie, il faut son code.
 
 - Animations (bouton « Animations », réglage de chaque navigateur) : les coureurs roulent pendant le mouvement
@@ -86,9 +87,18 @@ joueur ouvre les **résultats de l'étape** (arrivée, jetons, général, maillo
 puis lance l'étape suivante. Après la dernière étape : bonus des classements et classement final du Tour. L'hôte
 peut abandonner le Tour depuis l'écran des résultats (retour au salon).
 
-## Pas encore en ligne
+## Éditeur de parcours
 
-Éditeur de parcours.
+Lien « ✎ Éditeur de parcours » sur l'accueil et dans le salon (adresse `/editeur`). Comme l'éditeur de bureau : la
+palette des tuiles de la boîte (faces plate, montagne, Peloton), « À la fin », « Après la sélection »,
+« Remplacer » (double-clic : pose la tuile), la liste du parcours (◀ ▶ pour déplacer, Supprimer, Annuler, Tout
+effacer), l'aperçu, le profil et les messages (erreurs, quantités de la boîte). « Ouvrir » reprend l'exemple, une
+étape officielle, un circuit de base ou un de tes parcours ; « Importer » et « Télécharger » passent par un
+fichier `.json` (le même format que l'éditeur de bureau).
+
+**Enregistrer dans « Mes parcours »** n'existe que sur ton PC (`python main.py`) : le fichier va dans
+`parcours/` et le parcours apparaît dans le salon (recharger la page d'un salon déjà ouvert). Sur Render, rien
+n'est écrit sur le serveur : on télécharge le fichier.
 
 ## Technique
 

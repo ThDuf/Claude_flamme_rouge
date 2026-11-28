@@ -29,6 +29,7 @@ from flamme_rouge.boardview import (
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
 from flamme_rouge.decks import deck_summary  # noqa: F401 (aussi importé depuis ce module)
 from flamme_rouge.iso import best_angle, projection
+from flamme_rouge.paths import PARCOURS_DIR
 from flamme_rouge.controller import BREAKAWAY, CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
 from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
 from flamme_rouge.extensions import EXTENSIONS, PELOTON
@@ -88,10 +89,10 @@ class Player:
         return team is not None and (team == self.team or team in self.extra)
 
 
-def online_choices() -> list[Choice]:
+def online_choices(parcours_dir: Optional[str] = None) -> list[Choice]:
     """Les parcours jouables, avec une clé sans chemin de fichier (on ne montre pas les dossiers du PC hôte)."""
     out = []
-    for c in build_choices():
+    for c in build_choices(parcours_dir or PARCOURS_DIR):
         if not c.playable:
             continue
         key = f"mine:{c.label}" if c.group == GROUP_MINE else c.key
@@ -679,15 +680,26 @@ class Room:
 class Lobby:
     """Tous les salons du serveur."""
 
-    def __init__(self) -> None:
+    def __init__(self, parcours_dir: Optional[str] = None) -> None:
         self.rooms: dict[str, Room] = {}
         self.lock = threading.Lock()
+        self.parcours_dir = parcours_dir or PARCOURS_DIR  # parcours enregistrés (« Mes parcours »)
         self._choices: Optional[list[Choice]] = None
 
     def choices(self) -> list[Choice]:
         if self._choices is None:
-            self._choices = online_choices()
+            self._choices = online_choices(self.parcours_dir)
         return self._choices
+
+    def refresh_choices(self) -> None:
+        """Relit les parcours (un parcours vient d'être enregistré). La liste est modifiée sur place : les salons
+        déjà ouverts, qui la partagent, voient aussi le nouveau parcours."""
+        fresh = online_choices(self.parcours_dir)
+        with self.lock:
+            if self._choices is None:
+                self._choices = fresh
+            else:
+                self._choices[:] = fresh
 
     def create(self, name) -> tuple[Room, Player]:
         clean_name(name)

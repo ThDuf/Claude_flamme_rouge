@@ -14,14 +14,9 @@ import ui
 from flamme_rouge import palette as pal
 from flamme_rouge.boardview import plan_preview_primitives, tile_card_primitives
 from flamme_rouge.paths import ensure_parcours_dir
-from flamme_rouge.plan import PlanEditor
+from flamme_rouge.plan import FLAT_SIDE, MOUNTAIN_SIDE, PELOTON_SIDE, PlanEditor, letter_for_tile, side_letters
 from flamme_rouge.tiles import (
     ERROR,
-    KIND_FINISH,
-    KIND_SHARP,
-    KIND_SOFT,
-    KIND_START,
-    KIND_STRAIGHT,
     example_plan,
     has_errors,
     plan_from_json,
@@ -30,32 +25,13 @@ from flamme_rouge.tiles import (
     summary,
     validate,
 )
-from flamme_rouge.official import OFFICIAL_TILES, PELOTON_TILES, official_tile
+from flamme_rouge.official import PELOTON_TILES, official_tile
 
 PREVIEW_W, PREVIEW_H = 600, 470
 WINDOW_W, WINDOW_H = 1280, 800
 
 CARD_W, CARD_H = 96, 50
 CARD_COLUMNS = 3
-FLAT_SIDE, MOUNTAIN_SIDE, PELOTON_SIDE = "plat", "montagne", "peloton"
-_KIND_ORDER = {KIND_START: 0, KIND_FINISH: 1, KIND_STRAIGHT: 2, KIND_SOFT: 3, KIND_SHARP: 4}
-
-
-def side_letters(side: str) -> list[str]:
-    """Les 21 lettres d'une face de la boîte, rangées par type : départ, arrivée, droites, virages doux, serrés."""
-    if side == PELOTON_SIDE:
-        return list(PELOTON_TILES)
-    letters = "abcdefghijklmnopqrstu" if side == FLAT_SIDE else "ABCDEFGHIJKLMNOPQRSTU"
-    return sorted(letters, key=lambda c: (_KIND_ORDER[OFFICIAL_TILES[c].kind], OFFICIAL_TILES[c].direction or "", c))
-
-
-def letter_for_tile(tile) -> str | None:
-    """Lettre officielle d'une tuile du parcours (une tuile « libre » identique à une face officielle compte)."""
-    if tile.letter in OFFICIAL_TILES or tile.letter in PELOTON_TILES:
-        return tile.letter
-    return next((letter for letter, official in OFFICIAL_TILES.items() if official == tile), None)
-
-
 class TilePalette(tk.Frame):
     """Les tuiles de la boîte en petites cartes : un clic choisit, un double-clic pose la tuile."""
 

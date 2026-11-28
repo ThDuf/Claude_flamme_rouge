@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 if __package__ in (None, ""):  # lancé comme un script : le dossier du jeu doit être importable
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from online import editor_api  # noqa: E402
 from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, Player, parse_iso, parse_view  # noqa: E402
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
 from flamme_rouge import palette as pal  # noqa: E402
@@ -39,7 +40,8 @@ FX_COLORS = {
 }
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-STATIC_FILES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
+STATIC_FILES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css",
+                "/draw.js": "draw.js", "/editeur": "editor.html", "/editor.js": "editor.js"}
 MAX_BODY = 16 * 1024
 DEFAULT_PORT = 8770
 
@@ -58,12 +60,16 @@ def compact(value):
 class Api:
     """Les actions du site, indépendantes du protocole HTTP (testées directement)."""
 
-    def __init__(self, lobby: Optional[Lobby] = None):
+    def __init__(self, lobby: Optional[Lobby] = None, local: bool = False):
+        """`local` : serveur sur ce PC seulement (python main.py) ; l'éditeur peut alors enregistrer des fichiers."""
         self.lobby = lobby or Lobby()
+        self.local = local
 
     def handle(self, method: str, path: str, query: dict, body: dict) -> dict:
+        if path.startswith("/api/editor/"):
+            return self._editor(method, path[len("/api/editor/"):], query, body)
         if method == "GET" and path == "/api/info":
-            return {"parcours": self.lobby.parcours_list(), "teams": TEAM_COLORS,
+            return {"parcours": self.lobby.parcours_list(), "local": self.local, "teams": TEAM_COLORS,
                     "extensions": [{"key": k, "label": v[0], "description": v[1]} for k, v in EXTENSIONS.items()],
                     "seat_kinds": SEAT_KINDS, "colors": FX_COLORS}
         if method == "POST" and path == "/api/create":
@@ -114,6 +120,23 @@ class Api:
             else:
                 raise OnlineError("Action inconnue.")
             return {"ok": True, "version": room.version}
+
+    def _editor(self, method: str, route: str, query: dict, body: dict) -> dict:
+        """Éditeur de parcours (page /editeur) : voir online/editor_api.py."""
+        if method == "GET" and route == "tiles":
+            return editor_api.catalog()
+        if method == "GET" and route == "open":
+            return {"parcours": editor_api.openable(self.lobby), "local": self.local}
+        if method == "GET" and route == "load":
+            return editor_api.load(self.lobby, str(query.get("key") or ""))
+        if method == "POST" and route == "check":
+            selected = body.get("selected")
+            return editor_api.check(body.get("tiles"), selected if isinstance(selected, int) else None)
+        if method == "POST" and route == "save":
+            if not self.local:
+                raise OnlineError("Sur le site en ligne, télécharge le fichier : l'enregistrement se fait sur ton PC.")
+            return editor_api.save(self.lobby, body.get("name"), body.get("tiles"))
+        raise OnlineError("Action inconnue.")
 
 
 def make_handler(api: Api):
@@ -189,7 +212,7 @@ class GameServer(ThreadingHTTPServer):
 def start_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> GameServer:
     """Le serveur prêt à écouter (port 0 : un port libre, voir `server_address`). Quitte si le port est pris."""
     try:
-        httpd = GameServer((host, port), make_handler(Api()))
+        httpd = GameServer((host, port), make_handler(Api(local=host in ("127.0.0.1", "localhost", "::1"))))
     except OSError:
         print(f"Le port {port} est déjà utilisé : un serveur Flamme Rouge tourne sans doute déjà "
               f"(ferme sa fenêtre), ou choisis-en un autre avec --port.")

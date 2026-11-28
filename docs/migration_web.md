@@ -65,7 +65,11 @@ Le salon a un mode « Grand Tour » (liste d'étapes, jour de repos) ; `Room` ga
   écrans de `tour_screens.py`.
 - Tests : étendre `tests/test_online.py` avec une partie complète de deux étapes, jouée par l'IA.
 
-### Étape 3 : l'éditeur de parcours dans le navigateur
+### Étape 3 : l'éditeur de parcours dans le navigateur (faite)
+
+Page `/editeur` (`editor.html`, `editor.js`) ; le dessin des formes est partagé avec le jeu (`draw.js`). Le
+serveur reste sans état pour l'éditeur (`online/editor_api.py`) : la page envoie ses tuiles à chaque
+modification. L'enregistrement n'est permis que sur un serveur local. Tests : `tests/test_online_editor.py`.
 
 - Nouvelle page `editor.html` : la palette des tuiles, le plan, l'aperçu et le profil. Le serveur fournit
   déjà `tile_card_primitives`, `plan_preview_primitives` et `track_preview_primitives`.
