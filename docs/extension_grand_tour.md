@@ -91,9 +91,9 @@ quelques cartes du paquet et certaines cartes ont un pouvoir :
 
 ## Ce qui est programmé (Tour de base)
 
-- Menu : premier écran « Course unique » ou « Grand Tour ». Le Grand Tour ouvre le choix des étapes (aperçu et
-  profil du parcours, création de parcours, liste ordonnée ▲▼✕, au moins 3, préréglage « 6 officielles », jour de
-  repos), puis « Qui joue ? » (nombre d'équipes, joueurs/IA, extensions et options).
+- Salon : « Course unique » ou « Grand Tour ». Le Grand Tour ouvre la liste des étapes (ajout du parcours affiché,
+  liste ordonnée ▲▼✕, au moins 3, préréglage « 6 officielles », jour de repos) ; équipes, joueurs/IA et extensions
+  se règlent comme pour une course (voir `en_ligne.md`, « Grand Tour »).
 - Pendant une étape : petits maillots près des piles de jetons (valeur du prochain jeton) et maillot porté par
   le leader de chaque classement (sur la carte et en anneau sur le profil).
 - Tuile Chronométrage dessinée dans les cases après la ligne (+50 … +0) ; jetons Temps (« 1' », « 2' »…) près des
@@ -108,8 +108,8 @@ quelques cartes du paquet et certaines cartes ont un pouvoir :
 - Tour (`flamme_rouge/tour.py`) : paquets conservés (cartes Énergie jouées rendues, moitié de la fatigue rendue),
   podiums 3/2/1, maillots jaune/vert/à pois (un par coureur, priorité jaune > vert > pois), jour de repos,
   ordre de placement au départ, bonus de fin de Tour selon la longueur, classement final et égalités.
-- Écrans (`tour_screens.py`) : résultats entre deux étapes (arrivée, général, maillots, Points de Tour,
-  sprint, montagne), classement final.
+- Écrans du navigateur (`online/static/app.js`, état envoyé par `Room._tour_results_state`) : résultats entre
+  deux étapes (arrivée, général, maillots, Points de Tour, sprint, montagne), classement final.
 
 ## Provisoire en attendant les données
 - **Tuile Chronométrage** : secondes provisoires (`TIMING_FLAT`, `TIMING_MOUNTAIN` dans `stage.py`).

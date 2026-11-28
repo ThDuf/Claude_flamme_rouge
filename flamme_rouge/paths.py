@@ -6,6 +6,3 @@ PARCOURS_DIR = os.path.join(PROJECT_DIR, "parcours")  # parcours enregistrés av
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 
 
-def ensure_parcours_dir() -> str:
-    os.makedirs(PARCOURS_DIR, exist_ok=True)
-    return PARCOURS_DIR

@@ -1,19 +1,12 @@
-"""Couleurs de l'application (sans tkinter, pour que le dessin du plateau reste testable)."""
+"""Couleurs du dessin du plateau (boardview.py)."""
 
-# Interface (thème sombre)
-BG = "#0b1220"  # fond de fenêtre
-PANEL = "#111a2e"  # bandeaux
 CARD = "#17233f"  # cartes
 CARD_HI = "#1f3057"  # carte survolée
 BORDER = "#2a3a60"
-DISABLED = "#18233b"  # bouton désactivé
 TEXT = "#e8edf7"
 MUTED = "#93a4c3"
 FAINT = "#5d6f94"
 ACCENT = "#ff4d4f"  # la flamme rouge
-ACCENT_HI = "#ff7074"
-ACCENT_DK = "#d93638"
-GOOD = "#34d399"
 
 # Équipes : 1 rouge, 2 bleu, 3 vert, 4 jaune ; 5 rose et 6 blanc (extension Peloton)
 TEAM_FILL = ["#ff4d4f", "#3b82f6", "#22c55e", "#facc15", "#f472b6", "#f1f5f9"]

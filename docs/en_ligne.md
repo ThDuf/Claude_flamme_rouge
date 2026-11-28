@@ -28,8 +28,7 @@ Pour essayer une modification sur ton PC avant de la pousser : `python -m online
 ## Jouer sur ce PC
 
 `python main.py` démarre le serveur sur ce PC seulement (un port libre) et ouvre la page dans le navigateur.
-Les parcours enregistrés avec l'éditeur (dossier `parcours/`) y sont proposés. L'ancienne interface de bureau
-reste disponible avec `python main.py --tk`.
+Les parcours enregistrés avec l'éditeur (dossier `parcours/`) y sont proposés.
 
 **Plusieurs joueurs sur un seul écran** : dans le salon, « + Ici aussi » ajoute une équipe jouée depuis le même
 appareil (« Lâcher » la rend). Les mains restent cachées : chaque équipe voit ses cartes (et son deck) seulement
@@ -105,11 +104,11 @@ n'est écrit sur le serveur : on télécharge le fichier.
 - `online/rooms.py` : salons, places, déroulement (sans réseau, testé dans `tests/test_online.py`).
 - `online/server.py` : serveur HTTP ; le navigateur demande l'état environ deux fois par seconde
   (`/api/state?since=<version>` ne renvoie rien si rien n'a changé).
-- `online/static/` : la page ; elle dessine les formes de `boardview.py` sur des `<canvas>`, comme `ui.paint`
-  le fait dans Tkinter.
+- `online/static/` : les pages du jeu et de l'éditeur ; `draw.js` dessine les formes de `boardview.py` sur des
+  `<canvas>`.
 - Animations : le serveur envoie la route sans les coureurs, la géométrie de la route en pixels (bords droit et
   gauche de chaque case : `road_geometry`) et celle du profil (`profile_geometry`), les zones météo et le dernier
-  déplacement. `app.js` refait les calculs de `animation.py` et des effets météo de `boardview.py` sur un calque
+  déplacement. `app.js` fait glisser les coureurs et anime la météo sur un calque
   transparent, à ~30 images par seconde.
 - Le serveur refuse de démarrer si le port est déjà pris (sous Windows, deux serveurs pourraient sinon écouter le
   même port sans erreur).

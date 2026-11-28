@@ -1,4 +1,4 @@
-"""Géométrie 2D du parcours (sans tkinter) : où se trouve chaque case sur la carte.
+"""Géométrie 2D du parcours : où se trouve chaque case sur la carte.
 
 Repère mathématique : x vers la droite, y vers le haut ; la route démarre en (0, 0)
 vers l'est. L'interface retourne l'axe y au moment de dessiner.

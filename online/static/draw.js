@@ -1,6 +1,6 @@
 "use strict";
 // Outils partagés par le jeu (app.js) et l'éditeur de parcours (editor.js) : éléments HTML et dessin des formes
-// envoyées par le serveur (les mêmes que ui.paint dans la version tkinter).
+// envoyées par le serveur (flamme_rouge/boardview.py).
 
 const FONT = '"Segoe UI", system-ui, sans-serif';
 
@@ -48,7 +48,7 @@ function finish(ctx, fill, outline, width) {
   if (outline && width > 0) { ctx.strokeStyle = outline; ctx.lineWidth = width; ctx.stroke(); }
 }
 
-// Même rôle que ui.paint (Tkinter) : rect, oval, poly, path, line, text.
+// Les formes de boardview.py : rect, oval, poly, path, line, text.
 function paint(canvas, shapes, w, h, xf) {
   const ctx = setupCanvas(canvas, w, h, xf);
   ctx.lineCap = "round";

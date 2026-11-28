@@ -29,7 +29,7 @@ from flamme_rouge.boardview import (  # noqa: E402
 )
 from flamme_rouge.weather import CROSSWIND, HEADWIND, RAIN, SUNNY, TAILWIND  # noqa: E402
 
-# couleurs des animations du navigateur (les mêmes que dans Tkinter)
+# couleurs des animations du navigateur (les mêmes que celles du dessin du serveur, boardview.py)
 FX_COLORS = {
     "rain": FX_RAIN, "sun": FX_SUN, "wind": {k: v for k, v in FX_WIND.items()},
     "grass": pal.GRASS, "road": pal.TERRAIN_FILL["."], "card": pal.CARD, "shadow": pal.SHADOW,

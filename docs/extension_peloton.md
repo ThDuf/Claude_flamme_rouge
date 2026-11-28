@@ -47,11 +47,11 @@ auteur Asger Harding Granerud). Ce texte résume la règle avec nos mots ; il ne
 - 5 et 6 équipes (avec l'extension Peloton), couleurs rose et blanche.
 - Cases de 1 à 3 files ; pavés (1 file, pas d'aspiration) ; ravitaillement (3 files, minimum 4 cases) ;
   aspiration qui respecte la place disponible en sortie de zone large.
-- Équipes Peloton et Muscle, à choisir sur l'écran « Qui joue ? » (en plus de Joueur et IA).
+- Équipes Peloton et Muscle, à choisir pour chaque place dans le salon (en plus de Joueur et IA).
 - Les 9 tuiles, numérotées comme sur les cartes étape : 1 nouveau départ (5–6 équipes), 2 Échappée,
   3 et 4 zones à 3 files (ravitaillement), 5 à 8 pavés, 9 tuile bonus (5–6 équipes).
-- Les 12 cartes étape (étapes 7 à 12, côtés 2–4 et 5–6 équipes), dans la rubrique « Extension Peloton » du menu.
-- Variante Échappée : interrupteur sur l'écran « Qui joue ? » (seulement si le parcours a la tuile 2).
+- Les 12 cartes étape (étapes 7 à 12, côtés 2–4 et 5–6 équipes), dans la rubrique « Extension Peloton » de la liste des parcours.
+- Variante Échappée : case à cocher dans le salon (seulement si le parcours a la tuile 2).
   Chaque équipe choisit un coureur ou passe ; l'IA enchérit avec son Rouleur ; les fantômes ne participent pas.
 
 ## Choix faits faute d'information

@@ -56,10 +56,5 @@ def deck_summary(cards) -> list[dict]:
     return [{"label": label, "count": n, "fatigue": fatigue} for (_v, fatigue, label), n in sorted(counts.items())]
 
 
-def whole_deck(rider: Rider) -> list[Card]:
-    """Toutes les cartes du coureur encore en jeu : pioche, main en cours et recyclage."""
-    return rider.draw_pile + rider.recycle + rider.hand
-
-
 def all_decks_text(game: Game) -> str:
     return "\n\n".join(deck_text(r) for r in game.riders)

@@ -149,7 +149,7 @@ def main() -> None:
     parser.add_argument("teams", nargs="?", type=int, default=2, help="nombre d'équipes (2 à 4)")
     parser.add_argument("seed", nargs="?", type=int, default=None, help="graine du mélange")
     parser.add_argument("--secret", action="store_true", help="masque la main entre deux équipes")
-    parser.add_argument("--track", help="parcours .json créé avec editor.py")
+    parser.add_argument("--track", help="parcours .json créé avec l'éditeur de parcours (page /editeur)")
     args = parser.parse_args()
     SECRET = args.secret
 

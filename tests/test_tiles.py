@@ -3,7 +3,6 @@ import json
 import pytest
 
 from flamme_rouge import Game
-from flamme_rouge.plan import PlanEditor
 from flamme_rouge.tiles import (
     ERROR,
     KIND_FINISH,
@@ -238,73 +237,6 @@ def test_load_track_file(tmp_path):
     bad.write_text(plan_to_json([make_tile(KIND_STRAIGHT)]), encoding="utf-8")
     with pytest.raises(ValueError, match="injouable"):
         load_track_file(str(bad))
-
-
-# -------------------------------------------------------------------- éditeur
-
-
-def test_editor_append_insert_replace_remove():
-    ed = PlanEditor()
-    a, b, c = make_tile(KIND_START), make_tile(KIND_STRAIGHT), make_tile(KIND_FINISH)
-    ed.append(a)
-    ed.append(c)
-    assert ed.selected == 1
-    ed.select(0)
-    ed.insert_after(b)
-    assert ed.tiles == [a, b, c] and ed.selected == 1
-    ed.replace(make_tile(KIND_SOFT, LEFT))
-    assert ed.tiles[1].kind == KIND_SOFT
-    ed.remove()
-    assert ed.tiles == [a, c] and ed.selected == 1
-    ed.select(0)
-    ed.remove()
-    ed.remove()
-    assert ed.tiles == [] and ed.selected is None
-
-
-def test_editor_move():
-    ed = PlanEditor(simple(KIND_STRAIGHT))
-    ed.select(1)
-    ed.move(-1)
-    assert ed.tiles[0].kind == KIND_STRAIGHT and ed.selected == 0
-    ed.move(-1)  # déjà en tête : rien ne se passe
-    assert ed.selected == 0
-    ed.move(+1)
-    assert ed.selected == 1 and ed.tiles[1].kind == KIND_STRAIGHT
-
-
-def test_editor_needs_a_selection_for_selection_actions():
-    ed = PlanEditor(simple())
-    for action in (lambda: ed.replace(make_tile(KIND_STRAIGHT)), ed.remove, lambda: ed.move(1),
-                   lambda: ed.insert_after(make_tile(KIND_STRAIGHT))):
-        with pytest.raises(ValueError):
-            action()
-    with pytest.raises(IndexError):
-        ed.select(99)
-
-
-def test_editor_undo_restores_tiles_and_selection():
-    ed = PlanEditor(simple(KIND_STRAIGHT))
-    original = list(ed.tiles)
-    ed.select(1)
-    ed.remove()
-    ed.append(make_tile(KIND_SOFT, RIGHT))
-    ed.clear()
-    assert ed.tiles == []
-    ed.undo()
-    ed.undo()
-    ed.undo()
-    assert ed.tiles == original
-    ed.undo()  # rien à annuler : sans effet
-    assert ed.tiles == original and not ed.can_undo
-
-
-def test_editor_load_is_undoable():
-    ed = PlanEditor(simple())
-    ed.load(example_plan())
-    assert len(ed.tiles) == 14 and ed.selected is None
-    ed.undo()
-    assert len(ed.tiles) == 2
 
 
 # ---------------------------------------------------------------------- aperçu

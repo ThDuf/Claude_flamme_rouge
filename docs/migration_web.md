@@ -78,7 +78,12 @@ modification. L'enregistrement n'est permis que sur un serveur local. Tests : `t
 - En ligne, l'éditeur peut servir à créer un parcours pour un salon. Il est alors gardé dans le salon, pas
   sur le disque de Render.
 
-### Étape 4 : retrait de tkinter
+### Étape 4 : retrait de tkinter (faite)
+
+Supprimés : `gui.py`, `menu.py`, `ui.py`, `editor.py`, `tour_screens.py`, `tests/test_ui_smoke.py` et l'option
+`--tk`. Retirés du moteur, faute d'appelant : les animations et effets météo calculés en Python (le navigateur
+les fait lui-même), `PlanEditor` (l'édition est dans `editor.js`), et quelques couleurs et outils de l'interface
+de bureau. Le mode « même écran » cache toujours les mains entre deux équipes (plus d'option).
 
 - Supprimer `gui.py`, `menu.py`, `ui.py`, `editor.py`, `tour_screens.py` et l'option `--tk`.
 - Dans `boardview.py`, garder seulement ce que le serveur utilise. Les fonctions de dessin qui n'ont plus

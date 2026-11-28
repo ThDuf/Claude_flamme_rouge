@@ -183,48 +183,6 @@ def test_sunny_straights_have_no_effect():
     assert w.hand_size(4, 4) == 4 and not w.blocks_slipstream(4) and not w.is_rain(4)
 
 
-def test_weather_animation_on_the_profile():
-    from flamme_rouge.boardview import FX_RAIN, FX_SUN, FX_WIND, weather_fx_primitives
-
-    track = plan_to_track(official_stages()[0].tiles)
-    w = Weather([WeatherZone(6, 12, RAIN), WeatherZone(18, 24, TAILWIND), WeatherZone(26, 32, HEADWIND),
-                 WeatherZone(42, 48, CROSSWIND), WeatherZone(54, 60, SUNNY)])
-    a, b = weather_fx_primitives(track, w, 1000, 100, 0.0), weather_fx_primitives(track, w, 1000, 100, 0.4)
-    colors = {p[5] for p in a if p[0] == "line"} | {p[5] for p in a if p[0] == "oval"}
-    assert {FX_RAIN, FX_SUN} | set(FX_WIND.values()) <= colors
-    assert a != b  # ça bouge
-    for p in a + b:  # tout reste dans le cadre du profil
-        if p[0] == "line":
-            assert 0 <= min(p[1], p[3]) and max(p[1], p[3]) <= 1000 and 0 <= min(p[2], p[4]) and max(p[2], p[4]) <= 100
-    # le vent arrière va vers l'arrivée, le vent de face vers le départ
-    def head_x(prims, color):
-        return [p[3] for p in prims if p[0] == "line" and p[5] == color and p[6] == 2][0]
-    c = weather_fx_primitives(track, w, 1000, 100, 0.1)  # assez tôt pour qu'aucun trait ne reparte du bord
-    assert head_x(c, FX_WIND[TAILWIND]) > head_x(a, FX_WIND[TAILWIND])
-    assert head_x(c, FX_WIND[HEADWIND]) < head_x(a, FX_WIND[HEADWIND])
-    assert weather_fx_primitives(track, Weather(), 1000, 100, 0.0) == []
-
-
-def test_weather_animation_on_the_map():
-    from flamme_rouge.boardview import FX_RAIN, FX_SUN, map_weather_fx_primitives
-
-    zones = [WeatherZone(6, 12, RAIN), WeatherZone(18, 24, TAILWIND), WeatherZone(26, 32, HEADWIND),
-             WeatherZone(42, 48, CROSSWIND), WeatherZone(54, 60, SUNNY)]
-    g = Game(plan_to_track(official_stages()[0].tiles), num_teams=2, seed=0, weather=zones)
-    a, b = map_weather_fx_primitives(g, 0.0), map_weather_fx_primitives(g, 0.3)
-    assert a and a != b  # ça bouge
-    colors = {p[5] for p in a if p[0] in ("line", "oval")} | {p[6] for p in a if p[0] == "oval"}
-    assert FX_RAIN in colors and FX_SUN in colors
-    widths = {p[6] for p in a + b if p[0] == "line"}
-    assert {1, 2, 3} <= widths  # vent de travers sur trois plans de profondeur
-    # en zoom sur le départ, les zones hors du cadre ne sont pas animées
-    for r in g.riders:
-        r.position = 0
-    zoomed = map_weather_fx_primitives(g, 0.0, zoom=True)
-    assert len(zoomed) < len(a)
-    assert map_weather_fx_primitives(Game(seed=0), 0.0) == []
-
-
 def test_mix_colors():
     from flamme_rouge.boardview import _mix
 

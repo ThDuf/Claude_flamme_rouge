@@ -53,7 +53,7 @@ tôt, sur la première case qui a une file libre. Si cette case est sous la plui
 - `flamme_rouge/controller.py` : lignes du journal (« pioche 5 cartes », « se relève : −2 », « CHUTE sous la pluie »).
 - `flamme_rouge/boardview.py` : panneaux colorés le long des lignes droites, coureurs à terre,
   bandes météo sous le profil.
-- Menu : l'interrupteur « Meteo » active tout cela ; la météo est tirée au début de chaque course.
+- Salon : la case « Meteo » active tout cela ; la météo est tirée au début de chaque course.
 
 ## Points à trancher
 

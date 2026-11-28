@@ -1,7 +1,6 @@
-"""Géométrie du plateau pour l'interface graphique.
+"""Géométrie du plateau pour l'interface graphique (le navigateur les dessine avec online/static/draw.js).
 
-Aucune dépendance à tkinter : les fonctions renvoient des listes de formes à dessiner,
-ce qui permet de les tester sans écran. Formats des formes :
+Les fonctions renvoient des listes de formes à dessiner, ce qui permet de les tester sans écran. Formats des formes :
   ("rect", x0, y0, x1, y1, remplissage, contour, épaisseur)
   ("oval", x0, y0, x1, y1, remplissage, contour, épaisseur)
   ("line", x0, y0, x1, y1, couleur, épaisseur)
@@ -20,7 +19,7 @@ from .geometry import EXTRA_SQUARES, finish_edge, layout_squares, point_on_road
 from .rider import Rider
 from .tiles import KIND_START, Tile, finish_square, full_track, tile_ranges
 from .track import ASCENT, BREAKAWAY, COBBLES, DESCENT, NORMAL, SUPPLY, Track
-from .weather import CROSSWIND, HEADWIND, RAIN, SHORT as WEATHER_SHORT, SUNNY, TAILWIND, Weather
+from .weather import CROSSWIND, HEADWIND, SHORT as WEATHER_SHORT, TAILWIND, Weather
 from .stage import MOUNTAIN as TOKEN_MOUNTAIN, TokenStack, timing_table
 from .iso import ISO_BASE, Projection
 
@@ -36,14 +35,6 @@ TOP = 30
 ROW_H = 50
 BOARD_H = TOP + 3 * ROW_H + 26
 MINI_H = 46
-
-
-def terrain_text(game: Game, square: int) -> str:
-    """Symbole d'une case, en texte simple (pour les petites indications)."""
-    finish = len(game.track)
-    if square < finish:
-        return TERRAIN_SYMBOL[game.track.kind(square)]
-    return "┃" if square == finish else "░"
 
 
 def window(game: Game) -> tuple[int, int]:
@@ -433,88 +424,6 @@ def _mix(c1: str, c2: str, f: float) -> str:
 
 def _frac(x: float) -> float:
     return x - math.floor(x)
-
-
-def map_weather_fx_primitives(
-    game: Game,
-    t: float,
-    zoom: bool = False,
-    window: Optional[tuple[int, int]] = None,
-    width: int = BOARD_W,
-    height: int = MAP_H,
-    view: Optional[tuple[float, float, float]] = None,
-    proj: Optional[Projection] = None,
-) -> list[tuple]:
-    """Animation de la météo sur la carte, à l'instant `t` (en secondes), dans le même cadrage que map_primitives.
-
-    Pluie : gouttes qui tombent et ronds dans l'eau. Vent arrière / de face : traits qui filent le long de la route,
-    vers l'arrivée ou vers le départ. Vent de travers : rafales qui traversent la route sur trois plans (les plus
-    proches plus grandes, plus vives et plus rapides) pour donner de la profondeur. Beau temps : un petit soleil."""
-    squares, first, last, scale, tr = _map_frame(game, zoom, window, width, height, view, proj)
-    px = max(scale, 6.0)  # pixels par case, pour dimensionner les effets
-    prims: list[tuple] = []
-
-    def at(progress: float, lane: float) -> tuple[float, float]:
-        return tr(point_on_road(squares, progress, lane))
-
-    for k, zone in enumerate(game.weather.zones):
-        start, end = max(zone.start, first), min(zone.end, last + 1, len(squares))
-        if start >= end:
-            continue
-        length = end - start
-        seed = _frac(k * 0.37)
-        if zone.effect == RAIN:
-            for d in range(4 * length):
-                phase = _frac(d * 0.618 + seed)
-                p = start + _frac(d * 0.381 + seed * 3.1) * length
-                lane = -0.4 + _frac(d * 0.727 + seed) * 1.8
-                x, y = at(p, lane)
-                f = _frac(t * 0.9 + phase)
-                if f < 0.35:  # la goutte tombe (vue de dessus, en biais vers le bas de l'écran)
-                    g = f / 0.35
-                    drop = 0.5 * px * (1 - g)
-                    prims.append(("line", x - drop * 0.3, y - drop - 3, x - drop * 0.3 + 2, y - drop + 3, FX_RAIN, 1))
-                else:  # rond dans l'eau qui s'agrandit et s'efface
-                    g = (f - 0.35) / 0.65
-                    r = 1.5 + g * 0.22 * px
-                    color = _mix(FX_RAIN, pal.TERRAIN_FILL["."], g)
-                    prims.append(("oval", x - r, y - r * 0.6, x + r, y + r * 0.6, "", color, 1))
-        elif zone.effect in (TAILWIND, HEADWIND):
-            direction = 1 if zone.effect == TAILWIND else -1
-            color = FX_WIND[zone.effect]
-            for d in range(3 * length):
-                phase = _frac(d * 0.29 + seed)
-                lane = -0.6 + _frac(d * 0.53 + seed) * 2.2
-                f = _frac(t * 0.45 + phase)
-                head = start + (f if direction > 0 else 1 - f) * length
-                tail = head - 0.7 * direction
-                if not start <= tail <= end:
-                    continue
-                (x0, y0), (x1, y1) = at(tail, lane), at(head, lane)
-                prims.append(("line", x0, y0, x1, y1, _mix(pal.GRASS, color, 0.5 + 0.5 * math.sin(f * math.pi)), 2))
-        elif zone.effect == CROSSWIND:
-            color = FX_WIND[CROSSWIND]
-            for depth in (0.35, 0.65, 1.0):  # trois plans : du plus loin au plus proche
-                for d in range(max(2, int(length * 1.5))):
-                    phase = _frac(d * 0.41 + depth * 0.77 + seed)
-                    p = start + (d + 0.5) / max(2, int(length * 1.5)) * length
-                    f = _frac(t * (0.25 + 0.45 * depth) + phase)
-                    lane = 2.6 - f * 4.0  # de la gauche de la route vers la droite
-                    streak = 0.35 + 0.6 * depth
-                    (x0, y0), (x1, y1) = at(p, lane + streak), at(p, lane)
-                    lift = (1 - depth) * 0.18 * px  # les plans lointains un peu plus haut : effet de perspective
-                    fade = math.sin(f * math.pi)
-                    prims.append(("line", x0, y0 - lift, x1, y1 - lift, _mix(pal.GRASS, color, (0.3 + 0.7 * depth) * fade),
-                                  1 if depth < 0.5 else 2 if depth < 0.9 else 3))
-        elif zone.effect == SUNNY:
-            cx, cy = at(start + length / 2, 2.8)
-            r = max(4.0, min(9.0, 0.22 * px))
-            prims.append(("oval", cx - r, cy - r, cx + r, cy + r, FX_SUN, FX_SUN, 1))
-            for ray in range(8):
-                a = t * 0.8 + ray * math.pi / 4
-                prims.append(("line", cx + math.cos(a) * (r + 2), cy + math.sin(a) * (r + 2),
-                              cx + math.cos(a) * (r + 2 + r * 0.7), cy + math.sin(a) * (r + 2 + r * 0.7), FX_SUN, 2))
-    return prims
 
 
 def rider_token_size(scale: float) -> tuple[float, int]:
@@ -1105,58 +1014,6 @@ def _profile_frame(track: Track, width: int, height: int):
 FX_RAIN = "#93c5fd"
 FX_WIND = {TAILWIND: "#fde68a", HEADWIND: "#bae6fd", CROSSWIND: "#bbf7d0"}
 FX_SUN = "#fcd34d"
-
-
-def weather_fx_primitives(track: Track, weather: Weather, width: int, height: int, t: float) -> list[tuple]:
-    """Animation de la météo sur le profil, à l'instant `t` (en secondes) : pluie qui tombe, vent qui souffle
-    (vers l'arrivée pour le vent arrière, vers le départ pour le vent de face, en travers pour le vent de travers),
-    petit soleil sur les lignes droites « beau temps ». Purement décoratif."""
-    n = len(track)
-    _heights, _base, x_of, _y_of, y_at = _profile_frame(track, width, height)
-    top = PROFILE_PAD_TOP - 6
-    prims: list[tuple] = []
-    for k, zone in enumerate(weather.zones):
-        x0, x1 = x_of(zone.start), x_of(min(zone.end, n))
-        w = max(x1 - x0, 1.0)
-        seed = (k * 0.37) % 1.0
-        if zone.effect == RAIN:  # gouttes en biais qui tombent jusqu'à la route
-            for d in range(max(6, int(w / 7))):
-                phase = (d * 0.618 + seed) % 1.0
-                x = x0 + (d + 0.5) * w / max(6, int(w / 7))
-                ground = y_at(zone.start + (x - x0) / w * (min(zone.end, n) - zone.start))
-                y = top + ((t * 1.6 + phase) % 1.0) * max(ground - top - 4, 1)
-                prims.append(("line", x, y, x - 2, y + 6, FX_RAIN, 1))
-        elif zone.effect in FX_WIND:  # traits de vent qui glissent au-dessus de la route
-            direction = {TAILWIND: 1, HEADWIND: -1, CROSSWIND: 0}[zone.effect]
-            for d in range(4):
-                phase = (d * 0.29 + seed) % 1.0
-                ground = min(y_at(s + 0.5) for s in range(zone.start, min(zone.end, n)))
-                level = ground - 8 - d * 6
-                if direction:
-                    f = (t * 0.7 + phase) % 1.0
-                    x = x0 + (f if direction > 0 else 1 - f) * w
-                    tail = x - 10 * direction
-                    prims.append(("line", max(min(tail, x1), x0), level, max(min(x, x1), x0), level, FX_WIND[zone.effect], 2))
-                    prims.append(("line", x, level, x - 3 * direction, level - 2, FX_WIND[zone.effect], 1))
-                else:  # vent de travers : des rafales qui viennent vers nous (elles grossissent et s'éclairent)
-                    for g in range(2):
-                        f = _frac(t * 0.55 + phase + g * 0.5)
-                        cx = x0 + _frac(d * 0.31 + g * 0.47 + seed) * w
-                        cy = ground - 10 - _frac(d * 0.59 + g * 0.23) * 22 + f * 8
-                        size = 2 + 10 * f
-                        color = _mix(pal.CARD, FX_WIND[zone.effect], math.sin(f * math.pi))
-                        prims.append(("line", cx - size, cy - size * 0.25, cx + size, cy + size * 0.25, color,
-                                      1 if f < 0.4 else 2 if f < 0.75 else 3))
-        elif zone.effect == SUNNY:  # petit soleil dont les rayons tournent
-            cx = (x0 + x1) / 2
-            cy = min(y_at(s + 0.5) for s in range(zone.start, min(zone.end, n))) - 16
-            r = 4.5
-            prims.append(("oval", cx - r, cy - r, cx + r, cy + r, FX_SUN, FX_SUN, 1))
-            for ray in range(8):
-                a = t * 0.8 + ray * math.pi / 4
-                prims.append(("line", cx + math.cos(a) * (r + 2), cy + math.sin(a) * (r + 2),
-                              cx + math.cos(a) * (r + 5), cy + math.sin(a) * (r + 5), FX_SUN, 1))
-    return prims
 
 
 def profile_primitives(
