@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flamme Rouge en ligne</title>
   <link rel="stylesheet" href="style.css">
-  <!-- vue 3D (option) : Three.js, chargé depuis un CDN seulement quand on choisit « Vue 3D » -->
+  <!-- vue 3D (option) : Three.js (copié dans vendor/), chargé seulement quand on choisit « Vue 3D » -->
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+    { "imports": { "three": "/vendor/three-0.170.0/three.module.min.js",
+                   "three/addons/": "/vendor/three-0.170.0/addons/" } }
   </script>
 </head>
 <body>

@@ -131,9 +131,11 @@ sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, 
 d'arrivée ; coureurs en volume avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit, couchés et
 cerclés de rouge après une chute ; pluie, vent et soleil animés. Caméra : glisser = tourner, clic droit = déplacer,
 molette ou ＋/－ = zoom, ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
-la relecture. Le podium reste en 2D. Écart avec le plan : Three.js (0.170.0) vient pour l'instant du CDN jsDelivr
-(une « import map » dans `index.html`), pas de `online/static/vendor/` ; sans accès au CDN, la page le dit et
-revient au plan. Restent à faire : les maillots du Grand Tour sur les coureurs 3D, et le retrait de `iso.py` et
+la relecture. Le podium reste en 2D. Three.js 0.170.0 est copié tel quel (paquet npm, licence MIT) dans
+`online/static/vendor/three-0.170.0/` : le module minifié, `OrbitControls` et `CSS2DRenderer`, reliés par une
+« import map » dans `index.html`. Le numéro de version est dans le chemin : le serveur laisse le navigateur garder
+ces fichiers en cache. Pour changer de version, copier les mêmes fichiers dans un nouveau dossier et mettre à jour
+`THREE_DIR` (`online/server.py`) et l'import map. Restent à faire : les maillots du Grand Tour sur les coureurs 3D, et le retrait de `iso.py` et
 du code `proj` de `boardview.py` (le navigateur ne demande plus la vue isométrique).
 
 ### Étape 7 (optionnelle) : TypeScript

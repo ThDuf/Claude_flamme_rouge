@@ -808,7 +808,7 @@ function riderList(race, positions) {
 }
 
 let loading3d = null;
-function load3d() { // Three.js vient d'un CDN : chargé seulement quand on choisit la vue 3D
+function load3d() { // Three.js (vendor/) : chargé seulement quand on choisit la vue 3D
   if (!loading3d) {
     loading3d = import("./board3d.js").then((m) => {
       session.board3d = m.createBoard3D($("map3d"), { ...session.info.colors, fill: TEAM_FILL, label: LABEL_ON_FILL });
@@ -819,7 +819,7 @@ function load3d() { // Three.js vient d'un CDN : chargé seulement quand on choi
       session.iso = false;
       store("fr-iso", "0");
       paintIsoButton();
-      showError("race-error", "La vue 3D n'a pas pu se charger (pas d'accès à la bibliothèque Three.js) : retour au plan.");
+      showError("race-error", "La vue 3D n'a pas pu se charger (navigateur sans WebGL ?) : retour au plan.");
     });
   }
   return loading3d;

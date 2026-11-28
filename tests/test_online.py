@@ -227,6 +227,13 @@ def test_http_server_serves_the_page_and_the_api():
         assert err.value.code == 400 and "code" in json.loads(err.value.read())["error"]
         with pytest.raises(urllib.error.HTTPError):
             urllib.request.urlopen(base + "/../main.py")  # pas d'accès aux fichiers du PC
+        # la vue 3D : Three.js est servi par le site lui-même (pas de CDN), et gardé en cache par le navigateur
+        assert '"/vendor/three-0.170.0/three.module.min.js"' in page
+        for path in ("three.module.min.js", "addons/controls/OrbitControls.js", "addons/renderers/CSS2DRenderer.js"):
+            with urllib.request.urlopen(f"{base}/vendor/three-0.170.0/{path}") as res:
+                assert "javascript" in res.headers["Content-Type"] and "immutable" in res.headers["Cache-Control"]
+        with urllib.request.urlopen(base + "/app.js") as res:
+            assert res.headers["Cache-Control"] == "no-store"
     finally:
         httpd.shutdown()
         httpd.server_close()

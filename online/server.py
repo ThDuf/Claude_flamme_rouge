@@ -42,6 +42,11 @@ FX_COLORS = {
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css",
                 "/draw.js": "draw.js", "/board3d.js": "board3d.js", "/editeur": "editor.html", "/editor.js": "editor.js"}
+# Three.js (vue 3D), copié tel quel depuis le paquet npm « three » : le numéro de version est dans le chemin, donc
+# le navigateur peut le garder en cache (un changement de version change l'adresse)
+THREE_DIR = "vendor/three-0.170.0"
+STATIC_FILES.update({f"/{THREE_DIR}/{name}": f"{THREE_DIR}/{name}" for name in (
+    "three.module.min.js", "addons/controls/OrbitControls.js", "addons/renderers/CSS2DRenderer.js", "LICENSE.txt")})
 MAX_BODY = 16 * 1024
 DEFAULT_PORT = 8770
 
@@ -153,11 +158,11 @@ def make_handler(api: Api):
         def log_message(self, fmt, *args):  # journal discret : seulement les erreurs
             pass
 
-        def _send(self, status: int, data: bytes, content_type: str) -> None:
+        def _send(self, status: int, data: bytes, content_type: str, cache: bool = False) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable" if cache else "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(data)
@@ -200,7 +205,8 @@ def make_handler(api: Api):
             with open(os.path.join(STATIC_DIR, name), "rb") as handle:
                 data = handle.read()
             kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            self._send(200, data, kind + ("; charset=utf-8" if kind.startswith("text/") or kind.endswith("javascript") else ""))
+            self._send(200, data, kind + ("; charset=utf-8" if kind.startswith("text/") or kind.endswith("javascript") else ""),
+                       cache=name.startswith(THREE_DIR))
 
         def do_POST(self) -> None:  # noqa: N802
             if urlparse(self.path).path.startswith("/api/"):
