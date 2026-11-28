@@ -133,9 +133,10 @@ rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédal
 l'arrêt (le vélo se balance quand il roule), recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
 trapu ; maillot à bande claire (rouleur) ou foncée (sprinteur), casque et lunettes ; pendant l'aspiration, une
 poche d'air derrière celui qui protège et des traits de vitesse derrière l'aspiré ; après une chute, le vélo
-couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; pendant la phase de
-fatigue, ceux qui vont prendre une carte Fatigue (`tired` dans l'état, `Game.exhaustion_riders`) virent au rouge,
-avec un halo rouge qui pulse, un anneau qui s'élargit au sol et « +Fatigue » sur leur étiquette ; lignes de départ (blanche) et d'arrivée
+couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; au clic sur
+« Fatigue », ceux qui prennent une carte Fatigue (`fatigue` dans l'état : {id, names}, comme `anim`) virent au
+rouge pendant quelques secondes, avec un halo rouge qui pulse, un anneau qui s'élargit au sol et « +Fatigue » sur
+leur étiquette ; caméra « Vue coureurs » (2D et 3D) : tous les coureurs dans le cadre, du dernier au premier ; lignes de départ (blanche) et d'arrivée
 (damier), avec leur nom. Caméra : clic gauche = déplacer, clic molette (ou droit) = tourner, molette ou ＋/－ = zoom,
 ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
 la relecture. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et

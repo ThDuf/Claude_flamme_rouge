@@ -407,7 +407,7 @@ def test_local_launcher_server_takes_a_free_port():
         httpd.server_close()
 
 
-def test_riders_about_to_take_a_fatigue_card_are_marked():
+def test_fatigue_is_shown_after_the_click_only():
     api = Api()
     created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
     code, token = created["code"], created["token"]
@@ -420,14 +420,33 @@ def test_riders_about_to_take_a_fatigue_card_are_marked():
     api.handle("POST", "/api/cards", {}, {"code": code, "token": token, "choices": {h["name"]: 0 for h in hands}})
     for _ in range(4):
         state = race()
+        assert state["fatigue"] is None  # rien tant qu'on n'a pas cliqué sur « Fatigue »
         if state["phase"] == "exhaustion":
             break
-        assert not any(r["tired"] for r in state["riders"])  # pas encore la phase de fatigue
         api.handle("POST", "/api/advance", {}, {"code": code, "token": token, "phase": state["phase"]})
     state = race()
     assert state["phase"] == "exhaustion"
     occupied = {r["position"] for r in state["riders"]}
-    tired = {r["name"] for r in state["riders"] if r["tired"]}
-    assert tired and tired == {r["name"] for r in state["riders"] if r["position"] + 1 not in occupied}
+    expected = {r["name"] for r in state["riders"] if r["position"] + 1 not in occupied}
     api.handle("POST", "/api/advance", {}, {"code": code, "token": token, "phase": "exhaustion"})
-    assert not any(r["tired"] for r in race()["riders"])  # la fatigue est prise : plus de marque
+    after = race()
+    assert set(after["fatigue"]["names"]) == expected  # au clic : ceux qui ont pris une carte Fatigue
+
+
+def test_the_riders_camera_frames_every_rider():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+    room = api.lobby.room(code)
+    for i, rider in enumerate(room.game.riders):  # coureurs étalés, de la case 3 à la case 3 + 9 × (n − 1)
+        rider.position = 3 + 9 * i
+    front = max(r.position for r in room.game.riders)
+    room.bump()
+
+    def view(camera):
+        return api.handle("GET", "/api/state", {"code": code, "token": token, "camera": camera}, {})["race"]["view"]
+
+    from flamme_rouge.boardview import follow_window
+    assert follow_window(room.game, "coureurs") == (0, front + 6)  # du dernier au premier, avec de la marge
+    assert view("coureurs") != view("tete") and view("coureurs") != view("peloton")

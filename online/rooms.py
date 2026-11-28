@@ -22,7 +22,7 @@ from typing import Optional
 
 from flamme_rouge.animation import moves_between, snapshot
 from flamme_rouge.boardview import (
-    BOARD_W, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, MAX_SCALE, MIN_SCALE, follow_view, map_primitives, map_transform,
+    BOARD_W, FOLLOW_ALL, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, MAX_SCALE, MIN_SCALE, follow_view, map_primitives, map_transform,
     podium_primitives, profile_geometry,
     profile_primitives, road_geometry, track_preview_primitives,
 )
@@ -155,6 +155,7 @@ class Room:
     ctl: Optional[TurnController] = None
     ai_teams: frozenset = frozenset()
     last_anim: Optional[dict] = None  # dernier mouvement ou aspiration, rejoué par les navigateurs
+    last_fatigue: Optional[dict] = None  # la dernière fatigue : {id, names}, montrée une fois par les navigateurs
     initial_decks: dict = field(default_factory=dict)  # nom du coureur -> son deck au départ (panneau « Deck »)
     scene_id: int = 0  # numéro de la course en cours : la vue 3D ne recharge la route que s'il change
     _scene: Optional[dict] = None
@@ -338,7 +339,7 @@ class Room:
 
     def _begin(self, game: Game) -> None:
         """Une course (ou une étape du Tour) commence."""
-        self.game, self.stage_result, self.last_anim = game, None, None
+        self.game, self.stage_result, self.last_anim, self.last_fatigue = game, None, None, None
         self.scene_id, self._scene = self.scene_id + 1, None
         # avant le contrôleur : il fait déjà piocher (enchères de l'IA, premier tour)
         self.initial_decks = {r.name: deck_summary(r.draw_pile + r.recycle + r.hand) for r in game.riders
@@ -422,8 +423,11 @@ class Room:
         if phase != ctl.phase or ctl.phase not in ACTION_TEXT:
             return
         before = snapshot(self.game.riders)
+        tired = [r.name for r in self.game.exhaustion_riders()] if phase == EXHAUSTION else []
         ctl.advance()
         self.bump()
+        # fatigue : les coureurs qui viennent de prendre une carte Fatigue (la vue 3D les montre une fois, au clic)
+        self.last_fatigue = {"id": self.version, "names": tired} if phase == EXHAUSTION else None
         moves = moves_between(before, [r for r in self.game.all_riders if r in before]) \
             if phase in (MOVEMENT, SLIPSTREAM) else []
         # le navigateur rejoue ce déplacement une fois (identifié par la version qui l'a produit)
@@ -515,9 +519,8 @@ class Room:
             if len(self._cache) > MAX_CACHED_VIEWS:  # beaucoup de zooms différents : on repart de zéro
                 self._cache.clear()
             if view is None:
-                view = follow_view(g, camera, proj=proj) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
-            # phase de fatigue : les coureurs qui vont prendre une carte Fatigue (la vue 3D les montre)
-            tired = {r.name for r in g.exhaustion_riders()} if ctl.phase == EXHAUSTION else set()
+                view = follow_view(g, camera, proj=proj) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD, FOLLOW_ALL) \
+                    else None
             shared = {
                 "view": list(view or map_transform(g, proj=proj)),  # le cadrage utilisé : point de départ des zooms
                 "iso_angle": angle,
@@ -529,8 +532,9 @@ class Room:
                 "geo": road_geometry(g, view, proj=proj),
                 "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
                 "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane,
-                            "crashed": r.crashed, "tired": r.name in tired} for r in g.riders],
+                            "crashed": r.crashed} for r in g.riders],
                 "anim": self.last_anim,
+                "fatigue": self.last_fatigue,
                 "weather": [{"start": z.start, "end": z.end, "effect": z.effect} for z in g.weather.zones]
                 if g.weather else [],
             }

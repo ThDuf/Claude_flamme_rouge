@@ -54,12 +54,13 @@ qui rejoint avec le code.
 - Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », une vraie scène 3D
   (Three.js) avec le relief, des coureurs qui pédalent (en danseuse en montée, en roue libre en descente), le rouleur
   et le sprinteur reconnaissables, l'aspiration et les chutes visibles,
-  les coureurs qui vont prendre une carte Fatigue en rouge avec un halo, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
+  au clic sur « Fatigue », ceux qui prennent une carte Fatigue en rouge avec un halo, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
   molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. La météo y
   est en 3D : nuage, pluie, éclaboussures et route mouillée ; rafales, feuilles emportées et manche à air
   tournée dans le sens du vent. Dans le salon, le même bouton montre en 3D le parcours choisi. Three.js est servi par le site
   lui-même (`online/static/vendor/`) : la 3D marche aussi sans internet, en local.
-- Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
+- Caméra : tout le parcours, zoom peloton, zoom tête de course ou vue coureurs (tous les coureurs dans le cadre ;
+  chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
   net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.
 - Recharger la page ramène dans la partie (le navigateur garde ta place). À l'arrivée, l'hôte peut revenir au

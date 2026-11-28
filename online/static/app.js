@@ -802,12 +802,14 @@ function show3d() {
 }
 
 // les coureurs pour la vue 3D : leur place, ou celle de l'animation ou de la relecture en cours
-// `drafting` : les coureurs aspirés de l'animation en cours (la vue 3D montre l'aspiration)
-function riderList(race, positions, drafting = false) {
+// `drafting` : les coureurs aspirés de l'animation en cours (la vue 3D montre l'aspiration) ;
+// `tired` : ceux qui viennent de prendre une carte Fatigue
+function riderList(race, positions, drafting = false, tired = null) {
   return race.riders.map((r) => {
     const at = positions[r.name];
     return { name: r.name, team: r.team, crashed: !!r.crashed && !at, p: at ? at[0] : r.position,
-             lane: at ? at[1] : r.lane, draft: drafting && !!at, tired: !!r.tired && !at };
+             lane: at ? at[1] : r.lane, draft: drafting && !!at,
+             tired: !!tired && tired.has(r.name) && !at };
   });
 }
 
@@ -945,6 +947,16 @@ function syncReplayBar(race) {
   $("replay-play").textContent = session.replay.playing ? "⏸" : "▶";
 }
 
+// fatigue : après le clic, les coureurs qui prennent une carte Fatigue s'allument en rouge quelques secondes
+const FATIGUE_MS = 3500;
+function maybeShowFatigue(race, previousVersion, hadRace) {
+  const data = race.fatigue;
+  if (!data || data.id === session.seenFatigue) return;
+  session.seenFatigue = data.id;
+  if (!hadRace || data.id <= previousVersion || !data.names.length) return; // pas au premier chargement
+  session.fatigue = { names: new Set(data.names), start: performance.now() };
+}
+
 function maybeStartAnimation(race, previousVersion, hadRace) {
   const data = race.anim;
   if (!data || data.id === session.playedAnim) return;
@@ -1003,7 +1015,8 @@ function frame(now) {
     }
     const shown = session.anim ? session.anim.race : race;
     const drafting = !!session.anim && session.anim.anim.kind !== "movement";
-    session.board3d.draw({ list: riderList(shown, positions, drafting), rest: riderList(race, rest), follow: session.camera,
+    const fatigue = session.fatigue && now - session.fatigue.start < FATIGUE_MS ? session.fatigue.names : null;
+    session.board3d.draw({ list: riderList(shown, positions, drafting, fatigue), rest: riderList(race, rest), follow: session.camera,
       current: race.rider && race.rider.name, zones: race.weather, t, animate: session.animate });
     paint($("map-fx"), [], w, h);
     if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
@@ -1025,7 +1038,10 @@ function renderRace(state, previousVersion, hadRace) {
   $("phase-title").textContent = race.title;
   $("waiting").textContent = race.finished ? race.winner : race.waiting;
 
-  if (previousVersion !== undefined) maybeStartAnimation(race, previousVersion, hadRace);
+  if (previousVersion !== undefined) {
+    maybeStartAnimation(race, previousVersion, hadRace);
+    maybeShowFatigue(race, previousVersion, hadRace);
+  }
   drawBoard();
   $("toggle-podium").classList.toggle("hidden", !race.finished);
   $("toggle-podium").textContent = session.showPodium ? "⟲ Revoir la course" : "🏆 Voir le podium";

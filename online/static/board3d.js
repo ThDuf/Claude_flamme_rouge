@@ -898,8 +898,20 @@ export function createBoard3D(container, colors) {
   }
 
   // le cadrage : tout le parcours, ou un groupe suivi ; la caméra garde l'angle choisi par le joueur
+  // la boîte qui contient tous les coureurs (un peu de marge autour, et leur hauteur)
+  function ridersBox(list) {
+    const box = new THREE.Box3(), at = new THREE.Vector3();
+    for (const r of list) {
+      road.point(r.p, r.lane, at);
+      box.expandByPoint(at);
+      box.expandByPoint(at.clone().setY(at.y + 0.8));
+    }
+    return box.expandByScalar(0.9);
+  }
+
   function target(which, list) {
     if (!which || !list.length) return null;
+    if (which === "coureurs") return ridersBox(list).getCenter(new THREE.Vector3());
     const sorted = list.slice().sort((a, b) => b.p - a.p);
     const groups = [];
     for (const r of sorted) {
@@ -926,6 +938,8 @@ export function createBoard3D(container, colors) {
     }
     if (instant || offset.lengthSq() < 1e-6) offset.set(0, 1.1, 1); // de face, vu d'en haut à 48°
     if (!followed) distance = fitDistance(box, center, offset);
+    // vue coureurs : tous dans le cadre, au plus près (jamais plus près qu'un zoom de suivi)
+    else if (follow === "coureurs") distance = Math.max(fitDistance(ridersBox(list), center, offset), FOLLOW_DISTANCE * 0.8);
     offset.setLength(distance);
     const to = { target: center, position: center.clone().add(offset) };
     if (instant) {
