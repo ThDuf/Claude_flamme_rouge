@@ -134,7 +134,7 @@ cerclés de rouge après une chute ; lignes de départ (blanche) et d'arrivée
 ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
 la relecture. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et
 mouille la route (voile sombre et brillant) ; le vent souffle en rubans ondulants dans son sens, emporte feuilles
-et poussière, et fait claquer un drapeau au bord de la route (dans le dos, de face ou de travers) ; le soleil
+et poussière, et gonfle une manche à air au bord de la route (dans le dos, de face ou de travers) ; le soleil
 tourne. La même vue montre le parcours choisi dans le salon (bouton « Vue 3D » au-dessus de l'aperçu ; l'état du
 salon porte un `scene_id` « salon:<parcours> »). Une route ne passe jamais sur une autre : `scene.py` arrête la
 route d'après l'arrivée avant qu'elle touche le parcours (La Haut Montagne). Three.js 0.170.0 est copié tel quel (paquet npm, licence MIT) dans

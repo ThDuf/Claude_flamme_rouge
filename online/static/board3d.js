@@ -263,7 +263,7 @@ class RiderView {
 // ------------------------------------------------------------------ la météo
 // Pluie : un nuage sombre au-dessus de la zone, des gouttes en traits qui tombent en biais, des éclaboussures
 // qui s'élargissent sur la route et une route mouillée qui brille. Vent : des rafales en rubans ondulants qui
-// filent dans le sens du vent, des feuilles et de la poussière emportées, et un drapeau qui claque au bord de la
+// filent dans le sens du vent, des feuilles et de la poussière emportées, et une manche à air au bord de la
 // route, tourné dans le sens du vent (dans le dos, de face ou de travers).
 
 const RAIN_PER_SQUARE = 55; // gouttes par case
@@ -276,7 +276,8 @@ const CLOUD_COLOR = "#5d6b80";
 const GUST_PER_SQUARE = 5; // rubans de vent par case
 const GUST_POINTS = 12; // points le long d'un ruban
 const LEAF_PER_SQUARE = 4;
-const FLAG_POLE = 1.6, FLAG_W = 0.8, FLAG_H = 0.5; // le mât et le drapeau du vent, en cases
+const SOCK_POLE = 1.5, SOCK_LENGTH = 0.85, SOCK_MOUTH = 0.13, SOCK_TIP = 0.06; // la manche à air, en cases
+const SOCK_STRIPES = 5; // bandes rouges et blanches
 const LEAF_COLORS = ["#c9a227", "#a16207", "#84cc16", "#d6c7a1"];
 
 const rnd = (seed) => { const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
@@ -446,32 +447,51 @@ class WeatherView {
     };
   }
 
-  // un mât au bord de la route et son drapeau qui flotte dans le sens du vent (`dir` : vecteur au sol)
-  flag(p, lane, dir, color) {
+  // une manche à air au bord de la route : un mât, un anneau, et la manche rayée rouge et blanc, gonflée,
+  // tournée dans le sens du vent (`dir` : vecteur au sol) ; elle ondule et se balance un peu
+  windsock(p, lane, dir) {
     const foot = this.road.point(p, lane);
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, FLAG_POLE, 8),
-                                new THREE.MeshLambertMaterial({ color: "#e5e7eb" }));
-    pole.position.set(foot.x, foot.y + FLAG_POLE / 2, foot.z);
+    const metal = new THREE.MeshLambertMaterial({ color: "#e5e7eb" });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, SOCK_POLE, 8), metal);
+    pole.position.set(foot.x, foot.y + SOCK_POLE / 2, foot.z);
     pole.castShadow = true;
     this.group.add(pole);
-    const cloth = new THREE.PlaneGeometry(FLAG_W, FLAG_H, 14, 5);
-    cloth.translate(FLAG_W / 2, 0, 0); // le bord gauche du drapeau contre le mât
-    const rest = cloth.attributes.position.array.slice();
-    const flag = new THREE.Mesh(cloth, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide }));
-    flag.position.set(foot.x, foot.y + FLAG_POLE - FLAG_H / 2, foot.z);
-    flag.rotation.y = Math.atan2(-dir.z, dir.x); // +x du drapeau = le sens du vent
-    flag.castShadow = true;
-    this.group.add(flag);
+    const sock = new THREE.Group(); // +x = le sens du vent, l'origine en haut du mât
+    sock.position.set(foot.x, foot.y + SOCK_POLE, foot.z);
+    sock.rotation.y = Math.atan2(-dir.z, dir.x);
+    this.group.add(sock);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(SOCK_MOUTH, 0.012, 6, 20), metal); // l'anneau de l'entrée
+    ring.rotation.y = Math.PI / 2;
+    ring.position.x = 0.02;
+    sock.add(ring);
+    // la manche : un cône ouvert couché le long de +x, large à l'entrée, étroit au bout
+    const cone = new THREE.CylinderGeometry(SOCK_TIP, SOCK_MOUTH, SOCK_LENGTH, 18, 10, true);
+    cone.rotateZ(-Math.PI / 2); // le haut du cylindre (le bout étroit) part vers +x
+    cone.translate(SOCK_LENGTH / 2 + 0.02, 0, 0);
+    const rest = cone.attributes.position.array.slice();
+    const tint = new Float32Array(cone.attributes.position.count * 3), c = new THREE.Color();
+    for (let i = 0; i < cone.attributes.position.count; i++) {
+      const f = (rest[3 * i] - 0.02) / SOCK_LENGTH; // 0 à l'entrée, 1 au bout
+      c.set(Math.min(Math.floor(f * SOCK_STRIPES), SOCK_STRIPES - 1) % 2 ? "#f8fafc" : "#ef4444");
+      tint.set([c.r, c.g, c.b], i * 3);
+    }
+    cone.setAttribute("color", new THREE.BufferAttribute(tint, 3));
+    const mesh = new THREE.Mesh(cone, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    mesh.castShadow = true;
+    sock.add(mesh);
     return (t) => {
-      const pos = cloth.attributes.position;
+      const pos = cone.attributes.position;
       for (let i = 0; i < pos.count; i++) {
-        const x = rest[3 * i], y = rest[3 * i + 1];
-        const f = x / FLAG_W; // 0 contre le mât, 1 au bout : le bout claque plus fort
-        const wave = (Math.sin(x * 10 - t * 9) * 0.07 + Math.sin(x * 5 - t * 5 + y * 4) * 0.03) * f;
-        pos.setXYZ(i, x, y - f * 0.04, wave);
+        const x = rest[3 * i], y = rest[3 * i + 1], z = rest[3 * i + 2];
+        const f = Math.max(0, (x - 0.02) / SOCK_LENGTH); // le bout bouge plus que l'entrée
+        const sway = Math.sin(t * 2.3) * 0.05 * f * f + Math.sin(t * 7 + f * 6) * 0.015 * f;
+        const droop = -0.06 * f * f + Math.sin(t * 3.1 + f * 4) * 0.02 * f;
+        const breathe = 1 + Math.sin(t * 9 - f * 8) * 0.06 * f; // la toile se gonfle par vagues
+        pos.setXYZ(i, x, y * breathe + droop, z * breathe + sway);
       }
       pos.needsUpdate = true;
-      cloth.computeVertexNormals();
+      cone.computeVertexNormals();
+      sock.rotation.z = Math.sin(t * 1.7) * 0.04; // tout l'ensemble se balance un peu au bout du mât
     };
   }
 
@@ -493,8 +513,8 @@ class WeatherView {
     const leaves = this.leaves(Math.round(LEAF_PER_SQUARE * length), leafAlong);
     const a = road.point(start + 0.5, 0), b = road.point(start + 1.5, 0);
     const tangent = b.sub(a).setY(0).normalize().multiplyScalar(dir);
-    const flag = this.flag(start + 0.5, -1.4, tangent, color);
-    this.items.push((t) => { gusts(t); leaves(t); flag(t); });
+    const sock = this.windsock(start + 0.5, -1.4, tangent);
+    this.items.push((t) => { gusts(t); leaves(t); sock(t); });
   }
 
   crosswind(start, end, k, color) {
@@ -512,8 +532,8 @@ class WeatherView {
     const leaves = this.leaves(Math.round(LEAF_PER_SQUARE * length), leafAcross);
     const mid = start + Math.min(0.5, length / 2);
     const left = road.point(mid, lanes), right = road.point(mid, 0);
-    const flag = this.flag(mid, lanes + 0.6, right.sub(left).setY(0).normalize(), color);
-    this.items.push((t) => { gusts(t); leaves(t); flag(t); });
+    const sock = this.windsock(mid, lanes + 0.6, right.sub(left).setY(0).normalize());
+    this.items.push((t) => { gusts(t); leaves(t); sock(t); });
   }
 
   // ---------------------------------------------------------------- soleil
