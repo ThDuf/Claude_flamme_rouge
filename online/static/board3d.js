@@ -17,17 +17,14 @@ const ROAD_EDGE = "#e2e8f0", LANE_LINE = "#64748b", SQUARE_LINE = "#2a3444";
 const CURRENT_RING = "#fde047", CRASH_MARK = "#ff4d4f";
 const WHEEL = "#1e293b", FRAME = "#cbd5e1", SKIN = "#f1c27d";
 const WALL_SHADE = 0.55; // les côtés de la route, plus sombres que le dessus
-// le terrain en collines (voir class Terrain)
+// le terrain en talus (voir class Terrain)
 const ROAD_BORDER = 0.22; // la bordure fine sous la chaussée (plus profonde seulement si le terrain est plus bas)
 const TERRAIN_DROP = 0.12; // le terrain passe juste sous la chaussée (la bordure le cache)
 const TERRAIN_STEP = 0.5; // un point de terrain tous les 0,5 case
-const TERRAIN_MARGIN = 12; // le terrain déborde de 12 cases autour du parcours
-const TERRAIN_SPREAD = 4; // portée des montagnes autour de la route (écart type, en cases)
-const TERRAIN_FAR = 0.15; // poids de la plaine : loin de toute route, le terrain redescend au niveau le plus bas
-const TERRAIN_RISE = 1.9; // le terrain ne monte pas plus vite que ça en s'éloignant d'une route (jamais dessus)
-const TERRAIN_FALL = 1.2; // ni ne descend plus vite que ça sous la route la plus proche (pas de route en l'air)
-const TERRAIN_HILLS = 0.55; // hauteur des ondulations des collines
-const TERRAIN_GREEN = "#1f5a3b", TERRAIN_HIGH = "#3e7d4c"; // herbe, plus claire sur les hauteurs
+const TERRAIN_MARGIN = 8; // le terrain déborde de 8 cases autour du parcours (au-delà : la plaine)
+const TERRAIN_TALUS = 0.7; // pente du talus : il descend de 0,7 par case en s'éloignant de la route
+const TERRAIN_RISE = 1.9; // et ne monte jamais au-dessus d'une route voisine plus basse (pente maximale vers elle)
+const TERRAIN_GREEN = "#1f5a3b", TERRAIN_HIGH = "#2f6e45"; // herbe, un peu plus claire en haut du talus
 const CLIFF = "#6b5a48"; // la paroi de terre sous une route plus haute que le terrain
 const SLICES = 6; // tranches d'une case droite : la route s'arrondit aux changements de pente
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
@@ -52,11 +49,10 @@ function shade(hex, f) {
 }
 
 // ------------------------------------------------------------------ le terrain
-// Des collines qui suivent la route : la hauteur de chaque point mélange les altitudes de la route alentour
-// (pondérées par la distance : les cols ont leurs montagnes, la plaine reste basse loin de tout), plus de légères
-// ondulations. Deux bornes gardent la route toujours dessus : le terrain ne dépasse jamais une route voisine
-// (il monte en pente douce en s'en éloignant), et il ne descend pas trop vite sous la route la plus proche (la route
-// ne flotte pas). Sous la chaussée, il passe juste en dessous, caché par la bordure.
+// Un talus sous la route : la route est posée sur une levée de terre qui redescend en pente douce, de chaque côté,
+// jusqu'à une plaine plate. La hauteur d'un point est la plus haute des pentes descendant des routes voisines (ou la
+// plaine), mais jamais au-dessus d'une route plus basse toute proche (épingles, lacets : la route reste visible).
+// Sous la chaussée, le talus passe juste en dessous, caché par la bordure.
 
 class Terrain {
   constructor(road) {
@@ -76,38 +72,22 @@ class Terrain {
     this.nx = Math.ceil((Math.max(...xs) + TERRAIN_MARGIN - this.x0) / TERRAIN_STEP) + 1;
     this.nz = Math.ceil((Math.max(...zs) + TERRAIN_MARGIN - this.z0) / TERRAIN_STEP) + 1;
     this.h = new Float32Array(this.nx * this.nz);
-    const reach = 3 * TERRAIN_SPREAD + 4; // au-delà, une route n'a plus d'effet
+    const top = Math.max(...pts.map((q) => q[2]));
+    const reach = (top - this.low) / TERRAIN_TALUS + 1; // au-delà, le talus est déjà redescendu à la plaine
     for (let j = 0; j < this.nz; j++) {
       for (let i = 0; i < this.nx; i++) {
         const x = this.x0 + i * TERRAIN_STEP, z = this.z0 + j * TERRAIN_STEP;
-        let sum = 0, weight = 0, upper = Infinity, near = Infinity, nearY = this.low;
+        let mound = this.low, upper = Infinity;
         for (const [px, pz, py, half] of pts) {
           const dx = x - px, dz = z - pz;
           if (dx > reach || dx < -reach || dz > reach || dz < -reach) continue;
           const d = Math.max(Math.hypot(dx, dz) - half, 0); // 0 sur la chaussée
-          const g = Math.exp(-(d * d) / (2 * TERRAIN_SPREAD * TERRAIN_SPREAD));
-          sum += g * py;
-          weight += g;
-          upper = Math.min(upper, py - TERRAIN_DROP + TERRAIN_RISE * d);
-          if (d < near) { near = d; nearY = py; }
+          mound = Math.max(mound, py - TERRAIN_DROP - TERRAIN_TALUS * d); // le talus de cette route
+          upper = Math.min(upper, py - TERRAIN_DROP + TERRAIN_RISE * d); // jamais sur une route plus basse
         }
-        let hill = (sum + TERRAIN_FAR * this.low) / (weight + TERRAIN_FAR);
-        hill += this.waves(x, z) * TERRAIN_HILLS * (0.4 + Math.min(weight, 1)); // plus vallonné près des routes
-        const lower = near < Infinity ? nearY - TERRAIN_DROP - TERRAIN_FALL * near : -Infinity;
-        let y = Math.min(Math.max(hill, lower), upper);
-        // au bord du terrain, retour en douceur à la plaine
-        const edge = Math.min(i, j, this.nx - 1 - i, this.nz - 1 - j) * TERRAIN_STEP;
-        const f = Math.min(edge / 4, 1);
-        y = this.low + (y - this.low) * f * f * (3 - 2 * f);
-        this.h[j * this.nx + i] = y;
+        this.h[j * this.nx + i] = Math.min(mound, upper);
       }
     }
-  }
-
-  // des ondulations régulières (pas de hasard : le même parcours donne toujours le même paysage)
-  waves(x, z) {
-    return 0.5 * Math.sin(x * 0.31 + 1.7) * Math.cos(z * 0.27 + 0.4) + 0.3 * Math.sin(x * 0.13 - z * 0.17 + 2.1)
-      + 0.2 * Math.cos(x * 0.57 + z * 0.43);
   }
 
   // la hauteur du terrain en (x, z), entre les points de la grille
