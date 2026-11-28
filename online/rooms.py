@@ -23,7 +23,7 @@ from typing import Optional
 from flamme_rouge.animation import moves_between, snapshot
 from flamme_rouge.boardview import (
     BOARD_W, FOLLOW_ALL, FOLLOW_HEAD, FOLLOW_PELOTON, MAP_H, MAX_SCALE, MIN_SCALE, follow_view, map_primitives, map_transform,
-    podium_primitives, profile_geometry,
+    podium_primitives, profile_geometry, profile_title,
     profile_primitives, road_geometry, track_preview_primitives,
 )
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
@@ -531,6 +531,7 @@ class Room:
                 "map_base": map_primitives(g, view=view, draw_riders=False, proj=proj),
                 "geo": road_geometry(g, view, proj=proj),
                 "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
+                "profile_title": profile_title(g.track, g.weather),  # le titre du profil 3D
                 "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane,
                             "crashed": r.crashed} for r in g.riders],
                 "anim": self.last_anim,

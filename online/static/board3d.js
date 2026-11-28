@@ -395,8 +395,9 @@ class RiderView {
     this.sweat = Array.from({ length: SWEAT_DROPS }, (_, i) => {
       const drop = new THREE.Mesh(parts.drop, new THREE.MeshBasicMaterial({ color: SWEAT, transparent: true,
                                                                             opacity: 0.9, depthWrite: false }));
-      drop.userData = { phase: rnd(i * 13 + r.team), side: (i % 2 ? 1 : -1) * (0.012 + rnd(i * 7) * 0.02),
-                        speed: 0.9 + rnd(i * 3 + r.name.length) * 0.5 };
+      // une goutte sur deux part d'une tempe (côté gauche ou droit), les autres de la nuque ; jamais du visage
+      drop.userData = { phase: rnd(i * 13 + r.team), side: i % 2 ? 1 : -1, nape: i % 3 === 2,
+                        speed: 0.9 + rnd(i * 3 + r.name.length) * 0.5, jitter: rnd(i * 7) };
       this.model.add(drop);
       return drop;
     });
@@ -490,16 +491,19 @@ class RiderView {
     for (const drop of this.sweat) {
       drop.visible = on;
       if (!on) continue;
-      const { phase, side, speed } = drop.userData;
+      const { phase, side, speed, nape, jitter } = drop.userData;
       const life = (t * speed + phase) % 1;
       const head = this.head.position;
-      const start = [head.x + 0.03, head.y - 0.01]; // sur le visage, sous le casque
-      if (life < 0.25) { // elle perle et glisse le long de la joue
-        const f = life / 0.25;
-        drop.position.set(start[0] + 0.005 * f, start[1] - 0.03 * f, side);
-      } else { // elle tombe (accélérée), en reculant un peu avec la vitesse
-        const f = (life - 0.25) / 0.75;
-        drop.position.set(start[0] + 0.005 - 0.04 * f, start[1] - 0.03 - (start[1] - 0.06) * f * f, side * (1 + f));
+      // sous le bord du casque : sur la tempe (le côté de la tête) ou dans la nuque (derrière), puis le long du cou
+      const start = nape ? [head.x - 0.04, head.y - 0.005, side * 0.012 * jitter]
+        : [head.x - 0.005 - 0.01 * jitter, head.y + 0.002, side * 0.043];
+      const slide = nape ? [-0.008, -0.04, 0] : [-0.006, -0.042, side * -0.004]; // glisse vers le bas du cou
+      if (life < 0.3) { // elle perle et glisse sur la peau
+        const f = life / 0.3;
+        drop.position.set(start[0] + slide[0] * f, start[1] + slide[1] * f, start[2] + slide[2] * f);
+      } else { // elle se détache et tombe (accélérée), en reculant un peu avec la vitesse
+        const f = (life - 0.3) / 0.7, y0 = start[1] + slide[1];
+        drop.position.set(start[0] + slide[0] - 0.05 * f, y0 - (y0 - 0.05) * f * f, (start[2] + slide[2]) * (1 + 0.6 * f));
       }
       drop.material.opacity = life > 0.9 ? (1 - life) * 9 : 0.9;
     }
@@ -1109,4 +1113,254 @@ export function createBoard3D(container, colors) {
     setScene, draw, zoom, rotate, resize,
     frame: (which, list) => { lastFollowKey = ""; handled = false; frameView(which, list); },
   };
+}
+
+// ------------------------------------------------------------------ le profil en 3D
+// Le profil de l'étape (comme boardview.profile_primitives) devient une bande en relief, vue un peu de biais :
+// une case = 1 en x, l'altitude de décor en y, la largeur de la route en profondeur (z). Les coureurs roulent sur le
+// dessus, chacun dans sa file ; les cols ont leur badge, l'arrivée son poteau, la météo ses pictos.
+
+const PROFILE_DEPTH = 1.6; // profondeur de la bande (les files des coureurs sont dessus)
+const PROFILE_UNIT = 0.32; // hauteur d'une case de dénivelé (le profil reste lisible sans écraser le plat)
+const PROFILE_SOCLE = 0.8; // épaisseur sous le point le plus bas
+const PROFILE_VIEW = new THREE.Vector3(0.12, 0.38, 1); // la caméra : de face, un peu au-dessus et sur la droite
+const WEATHER_ICON = { pluie: "🌧", soleil: "☀", arriere: "➜ vent +1", face: "⬅ vent −1", travers: "⬇ travers" };
+
+export function createProfile3D(container, colors) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  container.append(renderer.domElement);
+  const labels = new CSS2DRenderer();
+  labels.domElement.className = "board3d-labels";
+  container.append(labels.domElement);
+  const title = document.createElement("div");
+  title.className = "profile3d-title";
+  container.append(title);
+
+  const scene = new THREE.Scene();
+  const world = new THREE.Group(); // tout le profil ; aplati en hauteur (world.scale.y) pour remplir la largeur
+  scene.add(world);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 200);
+  let pxPerSquare = 10; // largeur d'une case à l'écran (pour éviter que les étiquettes se chevauchent)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
+  const light = new THREE.DirectionalLight(0xffffff, 1.4);
+  light.position.set(-20, 40, 30);
+  scene.add(light);
+
+  let sceneId = null, group = null, data = null, n = 0, heights = [], low = 0;
+  const riders = new Map(), groupTags = [];
+  let weatherKey = "", weatherGroup = null;
+
+  const yAt = (p) => { // hauteur du dessus du profil à la case p (fractionnaire), comme boardview y_at
+    const i = Math.max(0, Math.min(n, Math.floor(p))), j = Math.min(n, i + 1), f = Math.max(0, Math.min(1, p - i));
+    return (heights[i] + (heights[j] - heights[i]) * f - low) * PROFILE_UNIT;
+  };
+
+  // une étiquette à la hauteur `y` du profil, `lift` au-dessus : ce décalage garde sa taille quand le profil est
+  // aplati (draw le recalcule)
+  function tag(text, cls, x, y, z = 0, lift = 0) {
+    const div = document.createElement("div");
+    div.className = cls;
+    div.textContent = text;
+    const t = new CSS2DObject(div);
+    t.position.set(x, y + lift, z);
+    t.userData = { y, lift };
+    return t;
+  }
+
+  function drop(g) {
+    if (g.parent) g.parent.remove(g);
+    g.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });
+  }
+
+  function setScene(sceneData, id) {
+    if (id === sceneId) return;
+    sceneId = id;
+    if (group) drop(group);
+    for (const r of riders.values()) drop(r);
+    riders.clear();
+    for (const t of groupTags.splice(0)) drop(t);
+    if (weatherGroup) drop(weatherGroup);
+    weatherGroup = null; weatherKey = "";
+    data = sceneData;
+    n = data.n;
+    heights = data.profile.heights;
+    low = Math.min(...heights);
+    group = new THREE.Group();
+    // la bande : devant, dessus et côtés, une couleur par case (montée, descente, plat)
+    const front = [], frontC = [], top = [], topC = [], c = new THREE.Color();
+    const bottom = -PROFILE_SOCLE;
+    for (let s = 0; s < n; s++) {
+      c.set(data.profile.fills[data.squares[s].kind] || data.profile.fills["."]);
+      const y0 = yAt(s), y1 = yAt(s + 1);
+      front.push(s, bottom, 0, s + 1, bottom, 0, s + 1, y1, 0, s, bottom, 0, s + 1, y1, 0, s, y0, 0);
+      for (let k = 0; k < 6; k++) frontC.push(c.r, c.g, c.b);
+      const t = c.clone().lerp(new THREE.Color("#ffffff"), 0.18); // le dessus, plus clair (la route)
+      top.push(s, y0, 0, s + 1, y1, 0, s + 1, y1, -PROFILE_DEPTH, s, y0, 0, s + 1, y1, -PROFILE_DEPTH, s, y0, -PROFILE_DEPTH);
+      for (let k = 0; k < 6; k++) topC.push(t.r, t.g, t.b);
+    }
+    // les deux bouts : départ et arrivée
+    const side = (x, y) => [x, bottom, 0, x, y, 0, x, y, -PROFILE_DEPTH, x, bottom, 0, x, y, -PROFILE_DEPTH, x, bottom, -PROFILE_DEPTH];
+    const ends = [...side(0, yAt(0)), ...side(n, yAt(n))];
+    const mesh = (pos, col, shade = 1) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      if (col) g.setAttribute("color", new THREE.Float32BufferAttribute(col.map((v) => v * shade), 3));
+      g.computeVertexNormals();
+      return new THREE.Mesh(g, new THREE.MeshLambertMaterial(col ? { vertexColors: true, side: THREE.DoubleSide }
+        : { color: "#334155", side: THREE.DoubleSide }));
+    };
+    group.add(mesh(front, frontC, 0.85), mesh(top, topC), mesh(ends));
+    // le trait clair du dessus, sur le bord avant
+    const ridge = [];
+    for (let s = 0; s <= n; s++) ridge.push(new THREE.Vector3(s, yAt(s) + 0.02, 0.01));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ridge),
+                             new THREE.LineBasicMaterial({ color: data.profile.line })));
+    // le socle, les graduations
+    const step = n > 40 ? 10 : 5;
+    for (let s = 0; s <= n; s += step) group.add(tag(String(s), "profile3d-num", s, bottom - 0.4, 0));
+    // départ (trait blanc) et arrivée (poteau blanc, son nom)
+    const post = (x, h, w) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), new THREE.MeshBasicMaterial({ color: "#ffffff" }));
+      m.position.set(x, bottom + h / 2, 0.02);
+      group.add(m);
+    };
+    if (data.start) post(data.start, yAt(data.start) - bottom + 0.8, 0.12);
+    post(n, yAt(n) - bottom + 1.8, 0.2);
+    group.add(tag("ARRIVÉE", "profile3d-finish", n, yAt(n), 0, 2.2));
+    // les cols : un badge rouge au sommet
+    for (const [, topSquare, category] of data.profile.climbs) {
+      const x = Math.min(topSquare, n) - (topSquare >= n ? 2.5 : 0);
+      group.add(tag(category, "profile3d-badge", x, yAt(Math.min(topSquare, n)), -PROFILE_DEPTH / 2, 1.0));
+    }
+    world.add(group);
+    fit();
+  }
+
+  // la caméra orthographique cadre toute la bande (et un peu d'air au-dessus pour les étiquettes)
+  function fit() {
+    if (!data) return;
+    const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;
+    const center = new THREE.Vector3(n / 2, 0, -PROFILE_DEPTH / 2);
+    camera.position.copy(center).add(PROFILE_VIEW.clone().normalize().multiplyScalar(50));
+    camera.lookAt(center);
+    camera.updateMatrixWorld();
+    const top = Math.max(...heights.map((v) => (v - low) * PROFILE_UNIT)) + 2.4; // de l'air pour les étiquettes
+    const inv = camera.matrixWorldInverse, p = new THREE.Vector3();
+    const extents = (squash) => { // le cadre du profil à l'écran, la hauteur aplatie de `squash`
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        // de la marge sur les côtés : l'étiquette ARRIVÉE et les numéros ne sont pas coupés
+        p.set(k & 1 ? n + 3.5 : -1.5, (k & 2 ? top : -PROFILE_SOCLE - 1) * squash, k & 4 ? 0 : -PROFILE_DEPTH).applyMatrix4(inv);
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      }
+      return { minX, maxX, minY, maxY };
+    };
+    // toute la largeur ; si le profil est trop haut pour la bande, on l'aplatit (comme le profil 2D)
+    let e = extents(1);
+    const scale = (e.maxX - e.minX) / w;
+    let squash = 1;
+    for (let i = 0; i < 4 && e.maxY - e.minY > h * scale; i++) {
+      squash *= (h * scale) / (e.maxY - e.minY);
+      e = extents(squash);
+    }
+    world.scale.y = squash;
+    pxPerSquare = 1 / scale;
+    const { minX, maxX, minY, maxY } = e;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    Object.assign(camera, { left: cx - (w * scale) / 2, right: cx + (w * scale) / 2,
+                            top: cy + (h * scale) / 2, bottom: cy - (h * scale) / 2 });
+    camera.updateProjectionMatrix();
+  }
+
+  function resize() {
+    const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    labels.setSize(w, h);
+    fit();
+  }
+  new ResizeObserver(resize).observe(container);
+
+  // les groupes (comme boardview.group_labels) : la tête, le peloton (le plus gros), la lanterne rouge
+  function groups(list) {
+    const sorted = list.filter((r) => r.p < n + 30).slice().sort((a, b) => b.p - a.p || a.lane - b.lane);
+    const out = [];
+    for (const r of sorted) {
+      const g = out[out.length - 1];
+      if (g && Math.round(g[g.length - 1].p) - Math.round(r.p) <= 1) g.push(r); else out.push([r]);
+    }
+    const named = [];
+    if (out.length === 1) named.push(["PELOTON", out[0]]);
+    else if (out.length > 1) {
+      let peloton = out.reduce((best, g) => (g.length > best.length ? g : best), out[0]);
+      if (peloton.length < 2) peloton = null;
+      named.push([peloton === out[0] ? "TÊTE · PELOTON" : "TÊTE", out[0]]);
+      if (peloton && peloton !== out[0]) named.push(["PELOTON", peloton]);
+      const last = out[out.length - 1];
+      named.push(["LANTERNE ROUGE", [last[last.length - 1]]]);
+    }
+    return named;
+  }
+
+  function draw({ list, zones, titleText, t }) {
+    if (!data) return;
+    title.textContent = titleText || "";
+    // les coureurs : une bille à la couleur de l'équipe, sur le dessus, dans sa file
+    const seen = new Set();
+    for (const r of list) {
+      let ball = riders.get(r.name);
+      if (!ball) {
+        ball = new THREE.Mesh(new THREE.SphereGeometry(0.36, 16, 12), new THREE.MeshLambertMaterial({ color: colors.fill[r.team] }));
+        riders.set(r.name, ball);
+        world.add(ball);
+      }
+      const x = Math.min(r.p + 0.5, n);
+      ball.scale.y = 1 / world.scale.y; // la bille reste ronde quand le profil est aplati
+      ball.position.set(x, yAt(x) + 0.36 / world.scale.y, -PROFILE_DEPTH * (0.25 + 0.5 * Math.min(r.lane, 1.5) / 1.5));
+      seen.add(r.name);
+    }
+    for (const [name, ball] of riders) if (!seen.has(name)) { drop(ball); riders.delete(name); }
+    // les groupes nommés, au-dessus des coureurs
+    for (const g of groupTags.splice(0)) drop(g);
+    const placed = []; // [gauche, droite, étage] des étiquettes déjà posées, en cases
+    for (const [name, members] of groups(list)) {
+      const front = Math.min(members[0].p, n), back = Math.min(members[members.length - 1].p, n);
+      const text = name === "LANTERNE ROUGE" ? `${name} · ${members[0].name}` : `${name} (${members.length})`;
+      const mid = (front + back) / 2 + 0.5;
+      const half = (text.length * 5.6 + 6) / 2 / pxPerSquare; // demi-largeur du texte, en cases
+      let floor = 0;
+      while (placed.some(([l, r, f]) => f === floor && mid - half < r && l < mid + half)) floor += 1;
+      placed.push([mid - half, mid + half, floor]);
+      const t2 = tag(text, "profile3d-group", mid, Math.max(yAt(front + 0.5), yAt(back + 0.5)), -PROFILE_DEPTH / 2,
+                     1.4 + floor * 1.1);
+      t2.element.style.color = colors.groups[name] || "#fff";
+      groupTags.push(t2);
+      world.add(t2);
+    }
+    // la météo : un picto au-dessus de chaque zone, et une bande colorée devant le socle
+    const key = JSON.stringify(zones);
+    if (key !== weatherKey) {
+      if (weatherGroup) drop(weatherGroup);
+      weatherGroup = new THREE.Group();
+      for (const z of zones) {
+        const a = Math.min(z.start, n), b = Math.min(z.end, n);
+        if (a >= b) continue;
+        const mid = (a + b) / 2;
+        weatherGroup.add(tag(WEATHER_ICON[z.effect] || "", "profile3d-weather", mid, yAt(mid), -PROFILE_DEPTH / 2, 1.9));
+      }
+      world.add(weatherGroup);
+      weatherKey = key;
+    }
+    world.traverse((o) => { // les étiquettes gardent leur écart au profil, même aplati
+      if (o.isCSS2DObject && o.userData.lift) o.position.y = o.userData.y + o.userData.lift / world.scale.y;
+    });
+    renderer.render(scene, camera);
+    labels.render(scene, camera);
+  }
+
+  return { get sceneId() { return sceneId; }, setScene, draw, resize };
 }

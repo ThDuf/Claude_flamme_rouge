@@ -130,7 +130,7 @@ Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». R
 sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
 rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à
-l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent et tombent, recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
+l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent des tempes et de la nuque, glissent le long du cou et tombent, recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
 trapu ; vélo avec selle, penché comme la route (nez en l'air en montée, en bas en descente) ; maillot à la couleur de l'équipe, casque et lunettes ; pendant l'aspiration, une
 poche d'air derrière celui qui protège et des traits de vitesse derrière l'aspiré ; après une chute, le vélo
 couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; au clic sur
@@ -139,7 +139,11 @@ rouge pendant quelques secondes, avec un halo rouge qui pulse, un anneau qui s'�
 leur étiquette ; caméra « Vue course » (2D et 3D) : tous les coureurs dans le cadre, du dernier au premier, et les 5 prochaines cases ; lignes de départ (blanche) et d'arrivée
 (damier), avec leur nom. Caméra : clic gauche = déplacer, clic molette (ou droit) = tourner, molette ou ＋/－ = zoom,
 ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
-la relecture. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et
+la relecture. Le profil passe aussi en 3D (`createProfile3D`) : une bande en relief vue un peu de biais, les
+coureurs roulent dessus dans leur file, badges de col, poteau d'arrivée, pictos météo, groupes nommés ; il remplit
+toute la largeur et s'aplatit en hauteur comme le profil 2D (la scène porte le relief de décor et les cols, l'état
+le titre `profile_title`). Sur grand écran (1500 px et plus), l'écran de course passe en trois colonnes : la main à
+gauche, le plateau au milieu, le bouton d'action et le journal à droite. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et
 mouille la route (voile sombre et brillant) ; le vent souffle en rubans ondulants dans son sens, emporte feuilles
 et poussière, et gonfle une manche à air au bord de la route (dans le dos, de face ou de travers) ; le soleil
 tourne. La même vue montre le parcours choisi dans le salon (bouton « Vue 3D » au-dessus de l'aperçu ; l'état du

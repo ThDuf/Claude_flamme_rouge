@@ -1023,6 +1023,21 @@ FX_WIND = {TAILWIND: "#fde68a", HEADWIND: "#bae6fd", CROSSWIND: "#bbf7d0"}
 FX_SUN = "#fcd34d"
 
 
+def profile_title(track: Track, weather: Optional[Weather] = None) -> str:
+    """La ligne au-dessus du profil : montées, descentes, météo, pavés, ravitaillement."""
+    n = len(track)
+    climb = sum(1 for s in range(n) if track.kind(s) == ASCENT)
+    drop = sum(1 for s in range(n) if track.kind(s) == DESCENT)
+    title = f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼"
+    if weather:
+        title += "  ·  Météo : " + (", ".join(WEATHER_SHORT[z.effect].lower() for z in weather.effects) or "beau temps")
+    if any(track.surface(s) == COBBLES for s in range(n)):
+        title += "  ·  pavés"
+    if any(track.surface(s) == SUPPLY for s in range(n)):
+        title += "  ·  ravitaillement"
+    return title
+
+
 def profile_primitives(
     track: Track,
     width: int,
@@ -1056,11 +1071,8 @@ def profile_primitives(
         prims.append(("line", x_of(track.start), y_at(track.start) - 8, x_of(track.start), base, "#ffffff", 2))
     prims.append(("line", x_of(n), PROFILE_PAD_TOP - 4, x_of(n), base, "#ffffff", 3))
     prims.append(("text", x_of(n), PROFILE_PAD_TOP - 12, "ARRIVÉE", "#ffffff", 8, True, "center"))
-    climb = sum(1 for s in range(n) if track.kind(s) == ASCENT)
-    drop = sum(1 for s in range(n) if track.kind(s) == DESCENT)
-    title = f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼"
+    title = profile_title(track, weather)
     if weather:
-        title += "  ·  Météo : " + (", ".join(WEATHER_SHORT[z.effect].lower() for z in weather.effects) or "beau temps")
         for zone in weather.effects:  # bande colorée sous l'axe, à l'endroit de chaque panneau
             prims.append(("rect", x_of(zone.start), base + 1, x_of(min(zone.end, n)), base + 5,
                           pal.WEATHER_FILL[zone.effect], "#ffffff", 1))
@@ -1069,10 +1081,6 @@ def profile_primitives(
         if surface:
             color = SURFACE_COLOR[surface]
             prims.append(("rect", x_of(s), base + 6, x_of(s + 1), base + 9, color, color, 1))
-    if any(track.surface(s) == COBBLES for s in range(n)):
-        title += "  ·  pavés"
-    if any(track.surface(s) == SUPPLY for s in range(n)):
-        title += "  ·  ravitaillement"
     prims.append(("text", PROFILE_PAD_X, PROFILE_TITLE_Y, title, pal.MUTED, 9, True, "w"))
     title_right = PROFILE_PAD_X + 6.5 * len(title)  # largeur approchée du titre (police 9 grasse)
 

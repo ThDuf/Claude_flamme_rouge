@@ -7,10 +7,10 @@ Le navigateur reçoit la scène une fois par course : les coureurs, eux, voyagen
 """
 from __future__ import annotations
 
-from .boardview import _surface_fill, elevation
+from .boardview import _surface_fill, climbs, cosmetic_elevation, elevation
 from .geometry import EXTRA_SQUARES, LANE_WIDTH, SquareGeom, layout_squares
 from .iso import ISO_BASE, ISO_LIFT
-from .palette import BEYOND_FILL, TERRAIN_FILL
+from .palette import BEYOND_FILL, PROFILE_FILL, PROFILE_LINE, TERRAIN_FILL
 from .track import Track
 
 DIGITS = 3  # millièmes de case : assez fin pour les arcs des virages (un point tous les 5°)
@@ -79,4 +79,12 @@ def build_scene(track: Track, extra: int = EXTRA_SQUARES) -> dict:
         "start": track.start,  # la ligne de départ est le bord arrière de la case `start`
         "lift": ISO_LIFT,  # hauteur d'une case de dénivelé, en longueurs de case
         "base": ISO_BASE,  # niveau du sol sous la route, en cases de dénivelé
+        # le profil vu de côté (comme boardview.profile_primitives) : altitude de décor de chaque bord de case,
+        # cols (première case de montée, case après le sommet, catégorie), couleurs
+        "profile": {
+            "heights": [round(h, DIGITS) for h in cosmetic_elevation(track)],
+            "climbs": [list(c) for c in climbs(track)],
+            "fills": PROFILE_FILL,
+            "line": PROFILE_LINE,
+        },
     }

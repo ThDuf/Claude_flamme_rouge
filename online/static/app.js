@@ -798,6 +798,7 @@ function show3d() {
   const race = session.state && session.state.race;
   if (!session.iso || !session.board3d || !race || !session.scene || session.scene.id !== race.scene_id) return false;
   if (session.board3d.sceneId !== session.scene.id) session.board3d.setScene(session.scene.data, session.scene.id);
+  if (session.profile3d.sceneId !== session.scene.id) session.profile3d.setScene(session.scene.data, session.scene.id);
   return !(race.finished && race.podium && session.showPodium && !session.anim);
 }
 
@@ -820,6 +821,7 @@ function load3d() { // Three.js (vendor/) : chargé seulement quand on choisit l
       const colors = { ...session.info.colors, fill: TEAM_FILL, label: LABEL_ON_FILL };
       session.board3d = m.createBoard3D($("map3d"), colors);
       session.previewBoard = m.createBoard3D($("preview3d"), colors);
+      session.profile3d = m.createProfile3D($("profile3d"), colors);
       drawBoard();
       if (session.state && session.state.lobby) renderLobby(session.state);
     }).catch((e) => {
@@ -859,6 +861,7 @@ function drawBoard() {
   if (session.anim || replayActive(race)) paint($("map"), (session.anim ? session.anim.race : race).map_base, w, h);
   else paint($("map"), podium ? race.podium : race.map, w, h);
   $("map3d").classList.toggle("hidden", !show3d());
+  $("profile3d").classList.toggle("hidden", !show3d()); // le profil passe en 3D avec le plateau
   // relecture : le profil sans coureurs ; leurs pastilles suivent la relecture sur le calque du profil
   paint($("profile"), replayActive(race) && race.profile_base ? race.profile_base : race.profile, w, ph);
 }
@@ -1018,9 +1021,9 @@ function frame(now) {
     const fatigue = session.fatigue && now - session.fatigue.start < FATIGUE_MS ? session.fatigue.names : null;
     session.board3d.draw({ list: riderList(shown, positions, drafting, fatigue), rest: riderList(race, rest), follow: session.camera,
       current: race.rider && race.rider.name, zones: race.weather, t, animate: session.animate });
+    session.profile3d.draw({ list: riderList(shown, positions), zones: race.weather, titleText: race.profile_title, t });
     paint($("map-fx"), [], w, h);
-    if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
-    paint($("profile-fx"), profileShapes, w, ph);
+    paint($("profile-fx"), [], w, ph);
     return;
   }
   if (weather && !podium) mapShapes = mapShapes.concat(mapWeatherShapes(session.anim ? session.anim.race : race, t));
