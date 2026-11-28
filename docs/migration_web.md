@@ -139,10 +139,7 @@ rouge pendant quelques secondes, avec un halo rouge qui pulse, un anneau qui s'�
 leur étiquette ; caméra « Vue course » (2D et 3D) : tous les coureurs dans le cadre, du dernier au premier, et les 5 prochaines cases ; lignes de départ (blanche) et d'arrivée
 (damier), avec leur nom. Caméra : clic gauche = déplacer, clic molette (ou droit) = tourner, molette ou ＋/－ = zoom,
 ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
-la relecture. Le profil passe aussi en 3D (`createProfile3D`) : une bande en relief vue un peu de biais, les
-coureurs roulent dessus dans leur file, badges de col, poteau d'arrivée, pictos météo, groupes nommés ; il remplit
-toute la largeur et s'aplatit en hauteur comme le profil 2D (la scène porte le relief de décor et les cols, l'état
-le titre `profile_title`). Sur grand écran (1500 px et plus), l'écran de course passe en trois colonnes : la main à
+la relecture. Le profil de l'étape reste en 2D sous la vue 3D. Sur grand écran (1500 px et plus), l'écran de course passe en trois colonnes : la main à
 gauche, le plateau au milieu, le bouton d'action et le journal à droite. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et
 mouille la route (voile sombre et brillant) ; le vent souffle en rubans ondulants dans son sens, emporte feuilles
 et poussière, et gonfle une manche à air au bord de la route (dans le dos, de face ou de travers) ; le soleil

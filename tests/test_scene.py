@@ -56,14 +56,3 @@ def test_terrain_and_lines():
     assert [r["kind"] for r in rows[4:12]] == list(".AAAADD.")
     assert rows[len(track)]["kind"] == "" and rows[len(track)]["fill"] != rows[0]["fill"]  # au-delà de l'arrivée
     assert scene["n"] == len(track) and scene["start"] == 2
-
-
-def test_the_profile_for_the_3d_view():
-    from flamme_rouge.boardview import climbs, cosmetic_elevation, profile_title
-    track = plan_to_track(official_stages()[2].tiles)
-    profile = build_scene(track)["profile"]
-    assert len(profile["heights"]) == len(track) + 1
-    assert profile["heights"] == pytest.approx(cosmetic_elevation(track), abs=1e-3)  # le même relief que le profil 2D
-    assert profile["climbs"] == [list(c) for c in climbs(track)] and profile["climbs"]
-    assert set(profile["fills"]) == {".", "A", "D"}
-    assert profile_title(track).startswith("Profil : ")
