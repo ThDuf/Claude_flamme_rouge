@@ -51,8 +51,10 @@ qui rejoint avec le code.
 - **📺 Écran partagé** (salon et course) : ouvre une fenêtre avec le plateau seulement, sans main, sans deck et
   sans bouton de jeu, à mettre sur une télé, un vidéoprojecteur ou en partage d'écran. Son adresse
   (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
-- Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », le plateau en relief et
-  les coureurs en petits cyclistes ; ⟲ ⟳ tournent le plateau de 30°.
+- Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », une vraie scène 3D
+  (Three.js) avec le relief, les coureurs en volume et la météo animée. Glisser = tourner, clic droit = déplacer,
+  molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. Three.js se
+  charge depuis internet (CDN jsDelivr) : sans connexion, la page le signale et reste sur le plan 2D.
 - Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
   net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.

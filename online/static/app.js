@@ -12,7 +12,8 @@ const POLL_MS = 600;
 const session = { code: null, token: null, version: 0, camera: "", showPodium: true, info: null, state: null,
                   anim: null, playedAnim: null, animate: true,
                   view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
-                  iso: false, isoAngle: null, // vue 3D (option) ; angle null = choisi par le serveur
+                  iso: false, // vue 3D (option, board3d.js) : la route arrive une fois par course (scene)
+                  scene: null, board3d: null, // {id, data} reçue du serveur ; la vue Three.js une fois chargée
                   replay: { t: 0, playing: false, last: 0 }, // revoir la course : position dans l'historique
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
@@ -126,7 +127,7 @@ async function poll() {
     const params = { code: session.code, since: session.version, camera: session.camera };
     if (session.watch) params.watch = 1; else params.token = session.token;
     if (session.view) params.view = session.view.map((v) => v.toFixed(2)).join(",");
-    if (session.iso) params.iso = session.isoAngle == null ? "auto" : String(session.isoAngle);
+    if (session.iso) params.scene = String(session.scene ? session.scene.id : 0); // la route, si on ne l'a pas
     const state = await get("/api/state", params);
     if (seq !== pollSeq) return; // une demande plus récente est partie : elle reprendra la boucle
     if (!state.same) {
@@ -171,6 +172,7 @@ function render(state, previousVersion, hadRace) {
     show("tour");
     renderTourResults(state);
   } else {
+    if (state.race.scene) session.scene = { id: state.race.scene_id, data: state.race.scene };
     show("race");
     renderRace(state, previousVersion, hadRace);
   }
@@ -749,13 +751,14 @@ function currentView() {
 function setupZoom() {
   const layer = $("map-layer");
   layer.addEventListener("wheel", (event) => {
-    if (!session.state || !session.state.race) return;
+    if (!session.state || !session.state.race || show3d()) return;
     event.preventDefault();
     const [px, py] = mapPoint(event), [w, h] = session.state.race.size;
     setView(zoomView(currentView(), event.deltaY < 0 ? 1.25 : 0.8, px, py, w, h));
   }, { passive: false });
   const button = (factor) => () => {
     if (!session.state || !session.state.race) return;
+    if (show3d()) { session.board3d.zoom(factor); return; }
     const [w, h] = session.state.race.size;
     setView(zoomView(currentView(), factor, w / 2, h / 2, w, h));
   };
@@ -763,7 +766,7 @@ function setupZoom() {
   $("zoom-out").addEventListener("click", button(1 / 1.4));
   let drag = null;
   layer.addEventListener("pointerdown", (event) => {
-    if (!session.state || !session.state.race || event.button !== 0) return;
+    if (!session.state || !session.state.race || event.button !== 0 || show3d()) return;
     drag = { at: mapPoint(event), moved: false };
     layer.setPointerCapture(event.pointerId);
   });
@@ -785,6 +788,48 @@ function setupZoom() {
   });
 }
 
+// ------------------------------------------------------------------ vue 3D (Three.js, board3d.js)
+
+// la vue 3D est à l'écran : l'option est choisie, la route est arrivée, et ce n'est pas le podium
+function show3d() {
+  const race = session.state && session.state.race;
+  if (!session.iso || !session.board3d || !race || !session.scene || session.scene.id !== race.scene_id) return false;
+  if (session.board3d.sceneId !== session.scene.id) session.board3d.setScene(session.scene.data, session.scene.id);
+  return !(race.finished && race.podium && session.showPodium && !session.anim);
+}
+
+// les coureurs pour la vue 3D : leur place, ou celle de l'animation ou de la relecture en cours
+function riderList(race, positions) {
+  return race.riders.map((r) => {
+    const at = positions[r.name];
+    return { name: r.name, team: r.team, crashed: !!r.crashed && !at, p: at ? at[0] : r.position,
+             lane: at ? at[1] : r.lane };
+  });
+}
+
+let loading3d = null;
+function load3d() { // Three.js vient d'un CDN : chargé seulement quand on choisit la vue 3D
+  if (!loading3d) {
+    loading3d = import("./board3d.js").then((m) => {
+      session.board3d = m.createBoard3D($("map3d"), { ...session.info.colors, fill: TEAM_FILL, label: LABEL_ON_FILL });
+      drawBoard();
+    }).catch((e) => {
+      console.error(e);
+      loading3d = null;
+      session.iso = false;
+      store("fr-iso", "0");
+      paintIsoButton();
+      showError("race-error", "La vue 3D n'a pas pu se charger (pas d'accès à la bibliothèque Three.js) : retour au plan.");
+    });
+  }
+  return loading3d;
+}
+
+function paintIsoButton() {
+  $("iso").classList.toggle("on", session.iso);
+  $("iso").textContent = (session.iso ? "✓ " : "") + "Vue 3D";
+}
+
 // Le plateau : la carte complète, ou, pendant un déplacement, la route seule avec les coureurs qui roulent par-dessus.
 function drawBoard() {
   const state = session.state;
@@ -794,6 +839,7 @@ function drawBoard() {
   const podium = race.finished && race.podium && session.showPodium;
   if (session.anim || replayActive(race)) paint($("map"), (session.anim ? session.anim.race : race).map_base, w, h);
   else paint($("map"), podium ? race.podium : race.map, w, h);
+  $("map3d").classList.toggle("hidden", !show3d());
   // relecture : le profil sans coureurs ; leurs pastilles suivent la relecture sur le calque du profil
   paint($("profile"), replayActive(race) && race.profile_base ? race.profile_base : race.profile, w, ph);
 }
@@ -927,6 +973,21 @@ function frame(now) {
   }
   const podium = race.finished && race.podium && session.showPodium && !session.anim;
   const weather = session.animate && race.weather.length;
+  if (show3d()) { // la vue 3D dessine route, coureurs et météo ; le calque 2D reste vide
+    let positions = {}, rest = {};
+    if (session.anim) positions = session.anim.anim.positions((now - session.anim.start) / 1000);
+    else if (replayActive(race)) { // la caméra suit la relecture, étape par étape
+      positions = replayPositions(race);
+      rest = race.history[Math.min(Math.round(session.replay.t), race.history.length - 1)].pos;
+    }
+    const shown = session.anim ? session.anim.race : race;
+    session.board3d.draw({ list: riderList(shown, positions), rest: riderList(race, rest), follow: session.camera,
+      current: race.rider && race.rider.name, zones: race.weather, t, animate: session.animate });
+    paint($("map-fx"), [], w, h);
+    if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
+    paint($("profile-fx"), profileShapes, w, ph);
+    return;
+  }
   if (weather && !podium) mapShapes = mapShapes.concat(mapWeatherShapes(session.anim ? session.anim.race : race, t));
   paint($("map-fx"), mapShapes, w, h);
   if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
@@ -1170,27 +1231,23 @@ async function start() {
     session.replay.t = Number(ev.target.value);
     session.replay.playing = false;
   });
-  // vue 3D : une option (la 2D par défaut), réglage propre à ce navigateur ; ⟲ ⟳ tournent le plateau
+  // vue 3D : une option (la 2D par défaut), réglage propre à ce navigateur ; ⟲ ⟳ tournent la caméra
   session.iso = load("fr-iso") === "1";
-  const isoButton = $("iso");
-  const paintIso = () => {
-    isoButton.classList.toggle("on", session.iso);
-    isoButton.textContent = (session.iso ? "✓ " : "") + "Vue 3D";
+  paintIsoButton();
+  if (session.iso) load3d();
+  const setIso = (on) => {
+    session.iso = on;
+    store("fr-iso", on ? "1" : "0");
+    paintIsoButton();
+    if (on) load3d();
+    drawBoard();
+    session.version = 0; // on redemande l'état : la route 3D part avec lui
+    poll();
   };
-  paintIso();
-  const redrawView = () => { session.view = null; session.anim = null; session.version = 0; poll(); };
-  isoButton.addEventListener("click", () => {
-    session.iso = !session.iso;
-    store("fr-iso", session.iso ? "1" : "0");
-    paintIso();
-    redrawView();
-  });
+  $("iso").addEventListener("click", () => setIso(!session.iso));
   const rotate = (step) => () => {
-    const race = session.state && session.state.race;
-    const current = session.isoAngle != null ? session.isoAngle : race && race.iso_angle != null ? race.iso_angle : 45;
-    session.isoAngle = ((current + step) % 360 + 360) % 360;
-    if (!session.iso) { session.iso = true; store("fr-iso", "1"); paintIso(); }
-    redrawView();
+    if (!session.iso) { setIso(true); return; }
+    if (session.board3d) session.board3d.rotate(step);
   };
   $("rotate-left").addEventListener("click", rotate(-30));
   $("rotate-right").addEventListener("click", rotate(30));
@@ -1219,6 +1276,7 @@ async function start() {
     b.addEventListener("click", () => {
       session.camera = b.dataset.camera;
       session.view = null; // une caméra remplace le cadrage libre
+      if (show3d()) session.board3d.frame(session.camera, riderList(session.state.race, {}));
       session.version = 0;
       poll();
     });

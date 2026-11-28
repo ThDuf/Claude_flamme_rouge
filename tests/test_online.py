@@ -280,6 +280,29 @@ def test_online_3d_view_is_an_option():
     assert race(iso="abc")["iso_angle"] is None  # illisible : carte 2D, sans erreur
 
 
+def test_the_3d_scene_is_sent_once_per_race():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+
+    def race(**query):
+        return api.handle("GET", "/api/state", {"code": code, "token": token, **query}, {})["race"]
+
+    plain = race()
+    assert "scene" not in plain and plain["scene_id"] >= 1  # sans vue 3D : pas de scène
+    first = race(scene="0")  # vue 3D, rien en main : la route part avec l'état
+    scene = first["scene"]
+    assert len(scene["squares"]) == len(scene["z"]) - 1 and scene["n"] > 0
+    assert any(len(str(p[0]).split(".")[-1]) == 3 for sq in scene["squares"] for p in sq["left"])  # au millième
+    assert "scene" not in race(scene=str(first["scene_id"]))  # déjà reçue : seulement les coureurs
+    assert all("crashed" in r for r in first["riders"])
+    api.handle("POST", "/api/lobby", {}, {"code": code, "token": token})
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+    again = race(scene=str(first["scene_id"]))  # nouvelle course : nouvelle scène
+    assert again["scene_id"] == first["scene_id"] + 1 and "scene" in again
+
+
 def test_finished_race_sends_its_history_for_the_replay():
     api = Api()
     code, alice, _bob = lobby_of_two(api)

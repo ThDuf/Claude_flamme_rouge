@@ -92,7 +92,7 @@ de bureau. Le mode « même écran » cache toujours les mains entre deux équip
   tant que la 2D les utilise.
 - `play_human.py` et `play_random.py` (terminal) restent : ils ne dépendent pas de tkinter.
 
-### Étape 5 : la scène en coordonnées du monde
+### Étape 5 : la scène en coordonnées du monde (faite)
 
 - Nouveau `flamme_rouge/scene.py`, qui renvoie la route en JSON à partir de `geometry.layout_squares` et de
   `boardview.road_altitudes` : pour chaque case, ses quatre coins (x, y), son altitude, ses files, son
@@ -103,7 +103,13 @@ de bureau. Le mode « même écran » cache toujours les mains entre deux équip
 - `tests/test_scene.py` vérifie que les coins collent avec `SquareGeom` et que les altitudes collent avec le
   profil.
 
-### Étape 6 : la vue Three.js
+Fait ainsi : `build_scene(track)` donne, pour chaque case, ses bords gauche et droit (en arc dans les virages,
+au millième de case), ses files, son terrain et sa couleur, et l'altitude de chaque bord de case. Les coureurs
+et la météo restent dans l'état de la course (ils y étaient déjà ; `crashed` s'ajoute aux coureurs). L'état porte
+un `scene_id` (numéro de la course) ; le navigateur en vue 3D envoie `scene=<le numéro qu'il a>` et reçoit la
+route seulement s'il ne l'a pas.
+
+### Étape 6 : la vue Three.js (faite, sauf le retrait de l'isométrique)
 
 - `online/static/board3d.js` (module ES, sans build) :
   - la route est un maillage construit à partir des coins des cases, avec des côtés jusqu'au sol. La couleur
@@ -119,6 +125,16 @@ de bureau. Le mode « même écran » cache toujours les mains entre deux équip
   elle est plus lisible sur un petit téléphone.
 - Quand la 3D est au point, supprimer `iso.py` et le code `proj` de `boardview.py`.
 - Garder les visuels **faits maison** : pas d'images officielles de la boîte (voir `portage_bga.md`).
+
+Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage (côtés jusqu'au sol,
+sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
+d'arrivée ; coureurs en volume avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit, couchés et
+cerclés de rouge après une chute ; pluie, vent et soleil animés. Caméra : glisser = tourner, clic droit = déplacer,
+molette ou ＋/－ = zoom, ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
+la relecture. Le podium reste en 2D. Écart avec le plan : Three.js (0.170.0) vient pour l'instant du CDN jsDelivr
+(une « import map » dans `index.html`), pas de `online/static/vendor/` ; sans accès au CDN, la page le dit et
+revient au plan. Restent à faire : les maillots du Grand Tour sur les coureurs 3D, et le retrait de `iso.py` et
+du code `proj` de `boardview.py` (le navigateur ne demande plus la vue isométrique).
 
 ### Étape 7 (optionnelle) : TypeScript
 

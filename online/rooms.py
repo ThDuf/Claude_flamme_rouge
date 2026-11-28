@@ -29,6 +29,7 @@ from flamme_rouge.boardview import (
 from flamme_rouge.catalog import GROUP_MINE, GROUP_PELOTON, Choice, build_choices
 from flamme_rouge.decks import deck_summary  # noqa: F401 (aussi importé depuis ce module)
 from flamme_rouge.iso import best_angle, projection
+from flamme_rouge.scene import build_scene
 from flamme_rouge.paths import PARCOURS_DIR
 from flamme_rouge.controller import BREAKAWAY, CHOOSE, EXHAUSTION, FINISHED, MOVEMENT, SLIPSTREAM, TurnController
 from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
@@ -155,6 +156,8 @@ class Room:
     ai_teams: frozenset = frozenset()
     last_anim: Optional[dict] = None  # dernier mouvement ou aspiration, rejoué par les navigateurs
     initial_decks: dict = field(default_factory=dict)  # nom du coureur -> son deck au départ (panneau « Deck »)
+    scene_id: int = 0  # numéro de la course en cours : la vue 3D ne recharge la route que s'il change
+    _scene: Optional[dict] = None
     version: int = 1
     touched: float = field(default_factory=time.monotonic)
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -336,6 +339,7 @@ class Room:
     def _begin(self, game: Game) -> None:
         """Une course (ou une étape du Tour) commence."""
         self.game, self.stage_result, self.last_anim = game, None, None
+        self.scene_id, self._scene = self.scene_id + 1, None
         # avant le contrôleur : il fait déjà piocher (enchères de l'IA, premier tour)
         self.initial_decks = {r.name: deck_summary(r.draw_pile + r.recycle + r.hand) for r in game.riders
                               if not game.is_ghost(r)}
@@ -437,7 +441,10 @@ class Room:
 
     # ------------------------------------------------------------------ état envoyé au navigateur
 
-    def state(self, player: Player, camera: str = "", view: Optional[tuple] = None, iso=None) -> dict:
+    def state(self, player: Player, camera: str = "", view: Optional[tuple] = None, iso=None,
+              scene: Optional[int] = None) -> dict:
+        """`scene` : numéro de la scène 3D que le navigateur a déjà (0 s'il n'en a pas, None sans vue 3D) ;
+        la route de la course part avec l'état seulement s'il ne l'a pas."""
         self.touched = time.monotonic()
         base = {
             "version": self.version,
@@ -452,6 +459,10 @@ class Room:
             base["tour_results"] = self._tour_results_state()
         else:
             base["race"] = self._race_state(player, camera, view, iso)
+            if scene is not None and scene != self.scene_id:
+                if self._scene is None:
+                    self._scene = build_scene(self.game.track)
+                base["race"]["scene"] = self._scene
         return base
 
     def _lobby_state(self) -> dict:
@@ -510,8 +521,8 @@ class Room:
                 "map_base": map_primitives(g, view=view, draw_riders=False, proj=proj),
                 "geo": road_geometry(g, view, proj=proj),
                 "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
-                "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane}
-                           for r in g.riders],
+                "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane,
+                            "crashed": r.crashed} for r in g.riders],
                 "anim": self.last_anim,
                 "weather": [{"start": z.start, "end": z.end, "effect": z.effect} for z in g.weather.zones]
                 if g.weather else [],
@@ -588,6 +599,7 @@ class Room:
             "winner": self._winner_text(),
             "size": [BOARD_W, MAP_H, PROFILE_H],
             "tour": self._tour_race_info(),
+            "scene_id": self.scene_id,
             **shared,
         }
 

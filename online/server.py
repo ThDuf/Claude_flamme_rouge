@@ -41,7 +41,7 @@ FX_COLORS = {
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_FILES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css",
-                "/draw.js": "draw.js", "/editeur": "editor.html", "/editor.js": "editor.js"}
+                "/draw.js": "draw.js", "/board3d.js": "board3d.js", "/editeur": "editor.html", "/editor.js": "editor.js"}
 MAX_BODY = 16 * 1024
 DEFAULT_PORT = 8770
 
@@ -89,9 +89,16 @@ class Api:
                 camera = str(query.get("camera") or "")
                 view = parse_view(query.get("view"))
                 iso = parse_iso(query.get("iso"))
+                scene = query.get("scene")
+                scene = int(scene) if scene and str(scene).isdigit() else None
                 if since == room.version:
                     return {"same": True, "version": room.version}
-                return compact(room.state(player, camera, view, iso))
+                state = room.state(player, camera, view, iso, scene)
+                road = state["race"].pop("scene", None) if "race" in state else None
+                state = compact(state)
+                if road is not None:  # au millième : compact() arrondit au dixième, trop grossier pour les virages
+                    state["race"]["scene"] = road
+                return state
             if method != "POST":
                 raise OnlineError("Action inconnue.")
             if path == "/api/seat":

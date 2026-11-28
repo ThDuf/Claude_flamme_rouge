@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flamme Rouge en ligne</title>
   <link rel="stylesheet" href="style.css">
+  <!-- vue 3D (option) : Three.js, chargé depuis un CDN seulement quand on choisit « Vue 3D » -->
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+  </script>
 </head>
 <body>
   <header class="top">
@@ -123,7 +128,8 @@
     <div id="tour-info" class="tour-info hidden"></div>
     <div class="board card">
       <!-- un calque transparent par-dessus chaque dessin : coureurs qui roulent, pluie, vent, soleil -->
-      <div class="layer" id="map-layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas></div>
+      <div class="layer" id="map-layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas>
+        <div id="map3d" class="board3d hidden"></div></div>
       <div class="layer"><canvas id="profile" width="1000" height="100"></canvas><canvas id="profile-fx" class="overlay"></canvas></div>
     </div>
     <div class="row gap wrap tools">
@@ -138,9 +144,9 @@
         <button data-camera="tete">Zoom tête de course</button>
       </div>
       <div class="segmented">
-        <button id="iso" title="Option : le plateau en relief, vu de biais">Vue 3D</button>
-        <button id="rotate-left" title="Tourner le plateau (vue 3D)">⟲</button>
-        <button id="rotate-right" title="Tourner le plateau (vue 3D)">⟳</button>
+        <button id="iso" title="Option : le plateau en 3D ; glisser = tourner, clic droit = déplacer, molette = zoom">Vue 3D</button>
+        <button id="rotate-left" title="Tourner la caméra (vue 3D)">⟲</button>
+        <button id="rotate-right" title="Tourner la caméra (vue 3D)">⟳</button>
       </div>
       <div class="segmented"><button id="animate" title="Déplacements et météo animés">✓ Animations</button></div>
       <button class="shared-screen player-only" title="Ouvre une fenêtre avec le plateau seulement (ni main ni deck), à montrer à tout le monde : télé, vidéoprojecteur, partage d'écran">📺 Écran partagé</button>
