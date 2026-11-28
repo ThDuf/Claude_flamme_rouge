@@ -154,6 +154,19 @@ function show(screen) {
   for (const id of ["home", "lobby", "race"]) $(id).classList.toggle("hidden", id !== screen);
 }
 
+// L'interface prend la couleur de l'équipe du joueur ; rouge d'origine (celui de style.css) pour un spectateur,
+// sur l'accueil ou sur l'écran partagé. Le texte posé sur l'accent suit LABEL_ON_FILL (foncé sur jaune, blanc…).
+function setAccent(team) {
+  const style = document.documentElement.style;
+  if (team == null || !TEAM_FILL[team]) {
+    style.removeProperty("--accent");
+    style.removeProperty("--on-accent");
+  } else {
+    style.setProperty("--accent", TEAM_FILL[team]);
+    style.setProperty("--on-accent", LABEL_ON_FILL[team]);
+  }
+}
+
 async function enter(code, token) {
   session.code = code;
   session.token = token;
@@ -222,6 +235,7 @@ async function poll() {
       history.replaceState(null, "", location.pathname);
       $("room-chip").classList.add("hidden");
       show("home");
+      setAccent(null);
       showError("home-error", e);
       return;
     }
@@ -230,6 +244,7 @@ async function poll() {
 }
 
 function render(state, previousVersion, hadRace) {
+  setAccent(session.watch || !state.me ? null : state.me.team);
   if (state.lobby) {
     session.anim = null;
     session.view = null; // le prochain parcours repart en vue complète
