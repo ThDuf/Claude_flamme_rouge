@@ -75,9 +75,20 @@ téléphone qui rejoint avec le code.
   le départ, chaque équipe à son tour choisit un coureur (ou passe) et mise deux cartes ; l'IA enchérit seule,
   les équipes fantômes ne participent pas.
 
+## Grand Tour
+
+Dans le salon, l'hôte choisit **Grand Tour** au lieu de **Course unique**, puis compose le Tour : « Ajouter ce
+parcours au Tour » ajoute le parcours affiché, ▲ ▼ changent l'ordre, ✕ enlève une étape, « 6 officielles » met
+les six cartes étape du jeu. Il faut au moins 3 étapes (21 au plus) ; un jour de repos peut suivre une étape.
+
+Pendant une étape, un bandeau rappelle l'étape, les maillots et le haut du général. À l'arrivée, n'importe quel
+joueur ouvre les **résultats de l'étape** (arrivée, jetons, général, maillots, Points de Tour, sprint, montagne),
+puis lance l'étape suivante. Après la dernière étape : bonus des classements et classement final du Tour. L'hôte
+peut abandonner le Tour depuis l'écran des résultats (retour au salon).
+
 ## Pas encore en ligne
 
-Grand Tour, éditeur de parcours.
+Éditeur de parcours.
 
 ## Technique
 

@@ -143,3 +143,30 @@ body.tv .race-bottom { grid-template-columns: 1fr; }
 body.tv .board { max-width: max(640px, calc((100vh - 230px) * 1000 / 530)); }
 /* grand écran : le panneau du deck pousse la course au lieu de la recouvrir */
 @media (min-width: 1100px) { body.deck-open #race { margin-right: 320px; } }
+
+/* Grand Tour */
+.mode-switch { margin-bottom: 10px; }
+.tour-settings { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+                 background: var(--panel); }
+.tour-settings button, .tour-settings select { padding: 4px 8px; font-size: 13px; }
+.tour-list { margin: 8px 0; padding-left: 26px; max-height: 220px; overflow-y: auto; }
+.tour-list li { padding: 3px 0; }
+.tour-list li .row { gap: 6px; }
+.tour-list li .label { flex: 1; }
+.tour-list li button { padding: 1px 7px; font-size: 12px; }
+.tour-info { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.tour-info .stage { font-weight: 700; }
+.jersey-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; border: 1px solid #0006;
+              vertical-align: -1px; margin-right: 3px; }
+.jersey-dot.pois { background: radial-gradient(circle at 30% 30%, #f87171 22%, #fff 24%) 0 0 / 5px 5px #fff; }
+.tour-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .tour-grid { grid-template-columns: 1fr; } }
+.tour-table { margin-bottom: 12px; }
+.tour-table h3 { margin: 0 0 8px; font-size: 15px; }
+.tour-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tour-table td { padding: 3px 6px 3px 0; white-space: nowrap; }
+.tour-table td.n { color: var(--faint); font-weight: 700; width: 2.5em; }
+.tour-table td.wide { white-space: normal; color: var(--muted); font-size: 12px; }
+.tour-final { margin-bottom: 14px; }
+.tour-final .winner { font-size: 22px; font-weight: 800; margin-top: 10px; }
+#tour-notes { margin: 4px 0 6px; line-height: 1.5; }

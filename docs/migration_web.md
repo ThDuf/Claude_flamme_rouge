@@ -54,7 +54,10 @@ de mélanger même écran et appareils distants. Voir `en_ligne.md`, « Jouer su
   l'option *main cachée* est cochée. Ce mode remplace `gui.py --secret`.
 - tkinter reste disponible, avec `python main.py --tk`, jusqu'à l'étape 4.
 
-### Étape 2 : le Grand Tour en ligne
+### Étape 2 : le Grand Tour en ligne (faite)
+
+Le salon a un mode « Grand Tour » (liste d'étapes, jour de repos) ; `Room` garde un `Tour` et passe par
+`/api/tour_next` de l'arrivée aux résultats, puis à l'étape suivante. Tests : `tests/test_online_tour.py`.
 
 - `Room` contient un `Tour` (`flamme_rouge/tour.py`) au lieu d'une seule `Game`. Le salon choisit les étapes,
   et après chaque arrivée on passe à un écran « résultats de l'étape » avant l'étape suivante.

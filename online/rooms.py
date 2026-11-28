@@ -33,6 +33,9 @@ from flamme_rouge.controller import BREAKAWAY, CHOOSE, EXHAUSTION, FINISHED, MOV
 from flamme_rouge.track import BREAKAWAY as BREAKAWAY_TILE
 from flamme_rouge.extensions import EXTENSIONS, PELOTON
 from flamme_rouge.game import TEAM_MUSCLE, TEAM_PELOTON, TEAM_PLAYER, Game
+from flamme_rouge.stage import format_time
+from flamme_rouge.tour import JERSEY_NAMES, StageResult, Tour, TourStage
+from flamme_rouge.track import Track
 
 TEAM_COLORS = ["rouge", "bleue", "verte", "jaune", "rose", "blanche"]
 SEAT_PLAYER, SEAT_AI = "joueur", "ia"  # une place : un joueur (ou l'IA si personne ne la prend), l'IA, ou un fantôme
@@ -44,6 +47,8 @@ ROOM_IDLE_SECONDS = 6 * 3600  # un salon sans activité depuis 6 h est oublié
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # sans I ni O (confondus avec 1 et 0)
 LOG_LINES = 80
 MAX_CACHED_VIEWS = 24  # cadrages différents gardés en mémoire pour une même version du salon
+SINGLE, TOUR = "course", "tour"  # course unique ou Grand Tour
+MIN_TOUR_STAGES, MAX_TOUR_STAGES = 3, 21
 
 PHASE_TITLES = {
     BREAKAWAY: "Enchères de l'échappée",
@@ -139,6 +144,11 @@ class Room:
     extensions: set = field(default_factory=set)
     seats: list[str] = field(default_factory=lambda: [SEAT_PLAYER] * len(TEAM_COLORS))
     breakaway: bool = True  # variante Échappée (seulement avec Peloton et une tuile Échappée sur le parcours)
+    mode: str = SINGLE
+    tour_stages: list = field(default_factory=list)  # Grand Tour : clés des parcours, dans l'ordre
+    rest_after: Optional[int] = None  # Grand Tour : jour de repos après cette étape (1 = la première)
+    tour: Optional[Tour] = None
+    stage_result: Optional[StageResult] = None  # Grand Tour : l'étape vient de finir, écran des résultats
     game: Optional[Game] = None
     ctl: Optional[TurnController] = None
     ai_teams: frozenset = frozenset()
@@ -239,24 +249,43 @@ class Room:
             player.extra = set()
         self.bump()
 
-    def breakaway_available(self) -> bool:
-        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours."""
-        track = self.choice().track
+    def breakaway_available(self, track: Optional[Track] = None) -> bool:
+        """La variante Échappée demande l'extension Peloton et une tuile Échappée sur le parcours (pour un Tour :
+        sur au moins une étape)."""
+        if track is None:
+            keys = self.tour_stages if self.mode == TOUR else [self.parcours]
+            return any(self.breakaway_available(self.choice(k).track) for k in keys)
         return PELOTON in self.extensions and any(track.surface(s) == BREAKAWAY_TILE for s in range(len(track)))
 
     def configure(self, player: Player, parcours=None, teams=None, extensions=None, seats=None,
-                  breakaway=None) -> None:
-        """L'hôte règle la partie ; les places devenues injouables sont libérées."""
+                  breakaway=None, mode=None, tour_stages=None, rest_after=None) -> None:
+        """L'hôte règle la partie ; les places devenues injouables sont libérées.
+        Grand Tour : `mode` = "tour", `tour_stages` = les clés des parcours dans l'ordre, `rest_after` = le numéro
+        de l'étape suivie d'un jour de repos (0 : pas de repos)."""
         self._require_host(player)
         self._require_lobby()
         if breakaway is not None:
             self.breakaway = bool(breakaway)
+        if mode is not None:
+            if mode not in (SINGLE, TOUR):
+                raise OnlineError("Type de course inconnu.")
+            self.mode = mode
+        if tour_stages is not None:
+            keys = [self.choice(str(k)).key for k in list(tour_stages)]
+            if len(keys) > MAX_TOUR_STAGES:
+                raise OnlineError(f"Un Tour compte au plus {MAX_TOUR_STAGES} étapes.")
+            self.tour_stages = keys
+        if rest_after is not None:
+            self.rest_after = int(rest_after) or None
+        if self.rest_after is not None and not 1 <= self.rest_after < len(self.tour_stages):
+            self.rest_after = None  # le repos se place entre deux étapes
         if parcours is not None:
             choice = self.choice(str(parcours))
             self.parcours = choice.key
         if extensions is not None:
             self.extensions = {e for e in extensions if e in EXTENSIONS}
-        if self.choice().group == GROUP_PELOTON:  # une étape Peloton se joue avec l'extension
+        played = self.tour_stages if self.mode == TOUR else [self.parcours]
+        if any(self.choice(k).group == GROUP_PELOTON for k in played):  # une étape Peloton se joue avec l'extension
             self.extensions.add(PELOTON)
         if teams is not None:
             teams = int(teams)
@@ -288,20 +317,50 @@ class Room:
         if not any(self.owner(t) for t in range(self.teams)):
             raise OnlineError("Personne n'a pris de place : prends une équipe avant de lancer.")
         team_types = [k if k in (TEAM_PELOTON, TEAM_MUSCLE) else TEAM_PLAYER for k in kinds]
-        self.game = Game(self.choice().track, num_teams=self.teams, seed=seed, extensions=frozenset(self.extensions),
-                         team_types=team_types)
+        if self.mode == TOUR and len(self.tour_stages) < MIN_TOUR_STAGES:
+            raise OnlineError(f"Un Tour compte au moins {MIN_TOUR_STAGES} étapes.")
         self.ai_teams = frozenset(t for t in range(self.teams)
                                   if team_types[t] == TEAM_PLAYER and self.owner(t) is None)
+        if self.mode == TOUR:
+            stages = [TourStage(self.choice(k).label, self.choice(k).track) for k in self.tour_stages]
+            self.tour = Tour(stages, self.teams, team_types, frozenset(self.extensions),
+                             {self.rest_after} if self.rest_after else (), seed=seed)
+            self._begin(self.tour.start_stage())
+        else:
+            self.tour = None
+            self._begin(Game(self.choice().track, num_teams=self.teams, seed=seed,
+                             extensions=frozenset(self.extensions), team_types=team_types))
+        self.bump()
+
+    def _begin(self, game: Game) -> None:
+        """Une course (ou une étape du Tour) commence."""
+        self.game, self.stage_result, self.last_anim = game, None, None
         # avant le contrôleur : il fait déjà piocher (enchères de l'IA, premier tour)
-        self.initial_decks = {r.name: deck_summary(r.draw_pile + r.recycle + r.hand) for r in self.game.riders
-                              if not self.game.is_ghost(r)}
-        self.ctl = TurnController(self.game, self.ai_teams, self.breakaway and self.breakaway_available(),
+        self.initial_decks = {r.name: deck_summary(r.draw_pile + r.recycle + r.hand) for r in game.riders
+                              if not game.is_ghost(r)}
+        self.ctl = TurnController(game, self.ai_teams, self.breakaway and self.breakaway_available(game.track),
                                   simultaneous=True)
+
+    def tour_next(self, player: Player, stage: int, screen: str) -> None:
+        """Grand Tour : après l'arrivée, l'écran des résultats ; après les résultats, l'étape suivante.
+        `stage` et `screen` ("race" ou "results") : ce que le joueur voyait (un deuxième clic ne fait rien)."""
+        if self.tour is None or self.ctl is None:
+            raise OnlineError("Pas de Grand Tour en cours.")
+        if not player.teams:
+            raise OnlineError("Les spectateurs ne peuvent pas faire avancer le Tour.")
+        if self.stage_result is None:
+            if screen != "race" or stage != self.tour.stage_index + 1 or self.ctl.phase != FINISHED:
+                return
+            self.stage_result = self.tour.finish_stage(self.game)
+        else:
+            if screen != "results" or stage != len(self.tour.results) or self.tour.finished:
+                return
+            self._begin(self.tour.start_stage())
         self.bump()
 
     def back_to_lobby(self, player: Player) -> None:
         self._require_host(player)
-        self.game = self.ctl = self.last_anim = None
+        self.game = self.ctl = self.last_anim = self.tour = self.stage_result = None
         self.bump()
 
     # ------------------------------------------------------------------ course
@@ -388,6 +447,8 @@ class Room:
         }
         if self.game is None:
             base["lobby"] = self._lobby_state()
+        elif self.stage_result is not None:
+            base["tour_results"] = self._tour_results_state()
         else:
             base["race"] = self._race_state(player, camera, view, iso)
         return base
@@ -415,6 +476,11 @@ class Room:
             "seats": seats,
             "preview": self._cache["preview"],
             "preview_size": [PREVIEW_W, PREVIEW_H, PREVIEW_PROFILE_H],
+            "mode": self.mode,
+            "tour_stages": [{"key": k, "label": self.choice(k).label} for k in self.tour_stages],
+            "rest_after": self.rest_after,
+            "min_stages": MIN_TOUR_STAGES,
+            "max_stages": MAX_TOUR_STAGES,
         }
 
     def _race_state(self, player: Player, camera: str, view: Optional[tuple] = None, iso=None) -> dict:
@@ -437,7 +503,8 @@ class Room:
                 "view": list(view or map_transform(g, proj=proj)),  # le cadrage utilisé : point de départ des zooms
                 "iso_angle": angle,
                 "map": map_primitives(g, rider, view=view, proj=proj),
-                "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather),
+                "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather,
+                                              jerseys=g.jerseys),
                 # pour les animations du navigateur : la route sans coureurs, sa géométrie, celle du profil
                 "map_base": map_primitives(g, view=view, draw_riders=False, proj=proj),
                 "geo": road_geometry(g, view, proj=proj),
@@ -519,8 +586,83 @@ class Room:
             "finished": ctl.phase == FINISHED,
             "winner": self._winner_text(),
             "size": [BOARD_W, MAP_H, PROFILE_H],
+            "tour": self._tour_race_info(),
             **shared,
         }
+
+    # ------------------------------------------------------------------ Grand Tour
+
+    def _tour_race_info(self) -> Optional[dict]:
+        """Pendant une étape : son numéro, les maillots et le haut du général avant l'étape."""
+        if self.tour is None:
+            return None
+        info = self.game.tour_standings or {}
+        return {
+            "stage": self.tour.stage_index + 1,
+            "stages": len(self.tour.stages),
+            "name": self.tour.current.name,
+            "jerseys": [{"jersey": j, "label": JERSEY_NAMES[j], "name": r.name, "team": r.team, "detail": d}
+                        for j, r, d in info.get("jerseys", [])],
+            "gc": [{"name": r.name, "team": r.team, "time": t, "gap": gap} for r, t, gap in info.get("gc", [])],
+        }
+
+    def _tour_results_state(self) -> dict:
+        """Entre deux étapes (et à la fin du Tour) : arrivée, classements, maillots, Points de Tour."""
+        tour, result = self.tour, self.stage_result
+        names = tour.names
+
+        def rider(k):
+            return {"name": names[k], "team": k[0]}
+
+        def gap(value):
+            return "+" + format_time(value) if value else ""
+
+        first = result.times[result.order[0]]
+        gc = tour.gc_order()
+        leader = tour.total_time[gc[0]]
+        labels = [self.team_label(t) for t in range(tour.num_teams)]
+        notes = []
+        if result.rest_day:
+            gained = ", ".join(f"{labels[t]} +{p}" for t, p in result.rest_points.items())
+            notes.append(f"Jour de repos : les leaders rapportent 1 Point de Tour ({gained}) et les autres "
+                         "récupèrent encore.")
+        notes.append("Fatigue : chaque coureur a rendu la moitié de ses cartes Fatigue "
+                     f"({sum(result.fatigue_returned.values())} au total) ; le reste le suit à l'étape suivante.")
+        by_points = sorted(range(tour.num_teams), key=lambda t: -tour.tour_points(t, with_bonus=False))
+        out = {
+            "stage": len(tour.results),
+            "stages": len(tour.stages),
+            "name": result.name,
+            "finished": tour.finished,
+            "next": None if tour.finished else tour.current.name,
+            "arrival": [{**rider(k), "time": format_time(result.times[k]), "gap": gap(result.times[k] - first)}
+                        for k in result.order],
+            "tokens": [{**rider(k), "text": f"sprint +{p}"} for k, p in result.sprint.items()]
+            + [{**rider(k), "text": f"montagne +{p}"} for k, p in result.mountain.items()],
+            "gc": [{**rider(k), "time": tour.time_text(k), "gap": gap(tour.total_time[k] - leader),
+                    "jersey": tour.jersey_of(k)} for k in gc],
+            "jerseys": [{"jersey": j, "label": JERSEY_NAMES[j], **rider(k)} for j, k in tour.jerseys.items()],
+            "points": [{"team": t, "label": labels[t], "points": tour.tour_points(t, with_bonus=False),
+                        "detail": f"podiums {tour.podium_points[t]}"
+                        + (f" · repos {tour.rest_points[t]}" if tour.rest_points[t] else "")} for t in by_points],
+            "sprint": [{**rider(k), "points": tour.sprint[k]} for k in tour.sprint_order()[:4]],
+            "mountain": [{**rider(k), "points": tour.mountain[k]} for k in tour.mountain_order()[:4]],
+            "notes": notes,
+        }
+        if tour.finished:
+            bonus = tour.bonus_points()
+            ranking = tour.final_ranking()
+            out["final"] = {
+                "winner": labels[ranking[0]],
+                "winner_team": ranking[0],
+                "ranking": [{"team": t, "label": labels[t], "points": tour.tour_points(t),
+                             "detail": f"podiums {tour.podium_points[t]} · général {bonus[t]['général']} · "
+                             f"équipe {bonus[t]['équipe']} · sprint {bonus[t]['sprint']} · "
+                             f"montagne {bonus[t]['montagne']}"
+                             + (f" · repos {tour.rest_points[t]}" if tour.rest_points[t] else "")}
+                            for t in ranking],
+            }
+        return out
 
     def _who(self, rider) -> str:
         owner = self.owner(rider.team)

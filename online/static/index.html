@@ -51,6 +51,10 @@
       <section class="card">
         <h2>Parcours</h2>
         <div id="host-settings">
+          <div class="segmented mode-switch" id="mode">
+            <button data-mode="course" title="Une étape, un vainqueur : le premier qui passe la ligne">Course unique</button>
+            <button data-mode="tour" title="Plusieurs étapes à la suite : temps, maillots, Points de Tour ; la fatigue suit les coureurs">Grand Tour</button>
+          </div>
           <div class="row gap wrap">
             <select id="parcours"></select>
             <select id="teams"></select>
@@ -61,6 +65,19 @@
               <input type="checkbox" id="breakaway"> Variante Échappée
             </label>
             <span class="muted small">enchères avant le départ (tuile Échappée du parcours)</span>
+          </div>
+          <div id="tour-settings" class="tour-settings hidden">
+            <div class="row gap wrap">
+              <b>Ton Tour</b>
+              <button id="tour-add" class="primary">＋ Ajouter ce parcours au Tour</button>
+              <button id="tour-official">6 officielles</button>
+              <button id="tour-clear">Tout enlever</button>
+            </div>
+            <ol id="tour-list" class="tour-list"></ol>
+            <div class="row gap wrap">
+              <label class="row gap">Repos après l'étape <select id="rest-after"></select></label>
+              <span id="tour-count" class="muted small"></span>
+            </div>
           </div>
         </div>
         <p id="guest-settings" class="muted"></p>
@@ -75,6 +92,26 @@
     </div>
   </main>
 
+  <!-- Grand Tour : résultats entre deux étapes, puis classement final -->
+  <main id="tour" class="screen hidden">
+    <div class="race-head">
+      <span class="badge" id="tour-badge"></span>
+      <span class="title" id="tour-title"></span>
+    </div>
+    <div id="tour-final" class="card tour-final hidden"></div>
+    <div class="tour-grid">
+      <div id="tour-col1"></div>
+      <div id="tour-col2"></div>
+      <div id="tour-col3"></div>
+    </div>
+    <div id="tour-notes" class="muted small"></div>
+    <div class="row space">
+      <button id="tour-quit" class="hidden">Revenir au salon</button>
+      <button class="primary big" id="tour-next"></button>
+    </div>
+    <p class="error" id="tour-error"></p>
+  </main>
+
   <!-- course -->
   <main id="race" class="screen hidden">
     <div class="race-head">
@@ -82,6 +119,7 @@
       <span class="title" id="phase-title"></span>
       <span class="muted" id="waiting"></span>
     </div>
+    <div id="tour-info" class="tour-info hidden"></div>
     <div class="board card">
       <!-- un calque transparent par-dessus chaque dessin : coureurs qui roulent, pluie, vent, soleil -->
       <div class="layer" id="map-layer"><canvas id="map" width="1000" height="430"></canvas><canvas id="map-fx" class="overlay"></canvas></div>

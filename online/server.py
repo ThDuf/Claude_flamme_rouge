@@ -94,7 +94,8 @@ class Api:
                                drop=bool(body.get("drop")))
             elif path == "/api/settings":
                 room.configure(player, body.get("parcours"), body.get("teams"), body.get("extensions"),
-                               body.get("seats"), body.get("breakaway"))
+                               body.get("seats"), body.get("breakaway"), body.get("mode"), body.get("tour_stages"),
+                               body.get("rest_after"))
             elif path == "/api/bid_rider":
                 name = body.get("rider")
                 room.bid_rider(player, None if name is None else str(name))
@@ -106,6 +107,8 @@ class Api:
                 room.play_cards(player, body.get("choices"))
             elif path == "/api/advance":
                 room.advance(player, str(body.get("phase") or ""))
+            elif path == "/api/tour_next":
+                room.tour_next(player, int(body.get("stage") or 0), str(body.get("screen") or ""))
             elif path == "/api/lobby":
                 room.back_to_lobby(player)
             else:

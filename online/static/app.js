@@ -152,7 +152,7 @@ function riderTag(name, team) {
 // ------------------------------------------------------------------ écrans
 
 function show(screen) {
-  for (const id of ["home", "lobby", "race"]) $(id).classList.toggle("hidden", id !== screen);
+  for (const id of ["home", "lobby", "race", "tour"]) $(id).classList.toggle("hidden", id !== screen);
 }
 
 async function enter(code, token) {
@@ -236,6 +236,11 @@ function render(state, previousVersion, hadRace) {
     session.view = null; // le prochain parcours repart en vue complète
     show("lobby");
     renderLobby(state);
+  } else if (state.tour_results) {
+    session.anim = null;
+    session.view = null; // l'étape suivante repart en vue complète
+    show("tour");
+    renderTourResults(state);
   } else {
     show("race");
     renderRace(state, previousVersion, hadRace);
@@ -295,9 +300,14 @@ function renderLobby(state) {
   $("secret-row").classList.toggle("hidden", state.me.teams.length < 2);
   $("secret").checked = session.secret;
 
+  const tour = lobby.mode === "tour";
   $("host-settings").classList.toggle("hidden", !host);
   $("guest-settings").textContent = host ? "" :
-    `${lobby.parcours_label} · ${lobby.teams} équipes · ` +
+    (tour ? `Grand Tour de ${lobby.tour_stages.length} étapes : ` +
+            lobby.tour_stages.map((s) => s.label).join(", ") +
+            (lobby.rest_after ? ` (repos après l'étape ${lobby.rest_after})` : "") + " · " :
+            `${lobby.parcours_label} · `) +
+    `${lobby.teams} équipes · ` +
     (lobby.extensions.length ? "extensions : " + lobby.extensions.join(", ") : "jeu de base") +
     (lobby.breakaway_available && lobby.breakaway ? " · variante Échappée" : "") +
     " — l'hôte règle la partie.";
@@ -313,6 +323,46 @@ function renderLobby(state) {
   paint($("preview-profile"), lobby.preview.profile, w, ph);
   $("lobby-details").textContent = `${lobby.parcours_label} · ${lobby.details}`;
   $("start").classList.toggle("hidden", !host);
+  renderTourSettings(lobby, host);
+}
+
+// Grand Tour dans le salon : la liste des étapes (▲ ▼ ✕), le jour de repos
+function renderTourSettings(lobby, host) {
+  const tour = lobby.mode === "tour";
+  for (const b of $("mode").querySelectorAll("button")) b.classList.toggle("on", b.dataset.mode === lobby.mode);
+  $("tour-settings").classList.toggle("hidden", !(host && tour));
+  const enough = !tour || lobby.tour_stages.length >= lobby.min_stages;
+  $("start").textContent = tour ? "▶ Lancer le Tour" : "▶ Lancer la course";
+  $("start").disabled = !enough;
+  $("start").title = enough ? "" : `Un Tour compte au moins ${lobby.min_stages} étapes`;
+  if (!host || !tour) return;
+  const keys = lobby.tour_stages.map((s) => s.key);
+  const list = $("tour-list");
+  list.innerHTML = "";
+  lobby.tour_stages.forEach((stage, i) => {
+    const move = (delta) => {
+      const order = keys.slice();
+      [order[i], order[i + delta]] = [order[i + delta], order[i]];
+      settings({ tour_stages: order });
+    };
+    const row = el("div", { class: "row" }, el("span", { class: "label" }, stage.label),
+      el("button", { title: "Plus tôt", onclick: () => move(-1), ...(i ? {} : { disabled: "" }) }, "▲"),
+      el("button", { title: "Plus tard", onclick: () => move(1), ...(i < keys.length - 1 ? {} : { disabled: "" }) }, "▼"),
+      el("button", { title: "Enlever", onclick: () => settings({ tour_stages: keys.filter((_, j) => j !== i) }) }, "✕"));
+    list.append(el("li", {}, row));
+  });
+  if (!keys.length) {
+    list.append(el("p", { class: "muted small" },
+      `Aucune étape : choisis un parcours ci-dessus, puis « Ajouter ce parcours au Tour » (au moins ${lobby.min_stages}).`));
+  }
+  $("tour-add").disabled = keys.length >= lobby.max_stages;
+  const rest = $("rest-after");
+  rest.innerHTML = "";
+  rest.append(el("option", { value: "0" }, "aucun"));
+  for (let n = 1; n < keys.length; n++) rest.append(el("option", { value: String(n) }, String(n)));
+  rest.value = String(lobby.rest_after || 0);
+  $("tour-count").textContent = `${keys.length} étape${keys.length > 1 ? "s" : ""}` +
+    (enough ? "" : ` · encore ${lobby.min_stages - keys.length} au moins`);
 }
 
 function buildSettings() {
@@ -340,6 +390,118 @@ function buildSettings() {
     $("extensions").append(el("label", { class: "ext", title: ext.description }, box, ext.label));
   }
   $("breakaway").addEventListener("change", () => settings({ breakaway: $("breakaway").checked }));
+  // Grand Tour
+  for (const b of $("mode").querySelectorAll("button")) b.addEventListener("click", () => settings({ mode: b.dataset.mode }));
+  const stageKeys = () => session.state.lobby.tour_stages.map((s) => s.key);
+  $("tour-add").addEventListener("click", () => settings({ tour_stages: stageKeys().concat([$("parcours").value]) }));
+  $("tour-official").addEventListener("click", () => settings({
+    tour_stages: session.info.parcours.filter((p) => p.group === "Parcours officiels").map((p) => p.key).slice(0, 6) }));
+  $("tour-clear").addEventListener("click", () => settings({ tour_stages: [] }));
+  $("rest-after").addEventListener("change", () => settings({ rest_after: Number($("rest-after").value) }));
+  $("tour-next").addEventListener("click", () => {
+    const r = session.state && session.state.tour_results;
+    if (r) tourNext(r.stage, "results", "tour-error");
+  });
+  $("tour-quit").addEventListener("click", () => {
+    if (confirm("Abandonner le Tour et revenir au salon ?")) backToLobby("tour-error");
+  });
+}
+
+async function tourNext(stage, screen, errorId) {
+  showError(errorId, null);
+  try { await api("/api/tour_next", { stage, screen }); poll(); } catch (e) { showError(errorId, e); poll(); }
+}
+
+async function backToLobby(errorId) {
+  showError(errorId, null);
+  try { await api("/api/lobby", {}); poll(); } catch (e) { showError(errorId, e); }
+}
+
+// ------------------------------------------------------------------ Grand Tour : résultats et classement final
+
+const JERSEY_COLORS = { jaune: "#facc15", vert: "#22c55e" };
+
+function jerseyDot(jersey) {
+  return el("span", { class: "jersey-dot " + jersey, style: JERSEY_COLORS[jersey] ? `background:${JERSEY_COLORS[jersey]}` : "" });
+}
+
+// Un petit tableau : un titre, puis des lignes de cellules (texte, ou nœud HTML).
+function tourTable(title, rows, empty = "—") {
+  const box = el("div", { class: "card tour-table" }, el("h3", {}, title));
+  const table = el("table");
+  for (const row of rows) {
+    const tr = el("tr");
+    row.forEach((cell, i) => {
+      const td = el("td", { class: i === 0 && typeof cell === "string" && /^\d+\.$/.test(cell) ? "n" : "" });
+      if (cell && cell.wide) { td.className = "wide"; td.append(cell.wide); } else td.append(cell == null ? "" : cell);
+      tr.append(td);
+    });
+    table.append(tr);
+  }
+  box.append(rows.length ? table : el("div", { class: "muted" }, empty));
+  return box;
+}
+
+function renderTourResults(state) {
+  const r = state.tour_results;
+  $("subtitle").textContent = r.finished ? "Fin du Tour" : `Grand Tour · étape ${r.stage}/${r.stages}`;
+  $("tour-badge").textContent = r.finished ? "FIN DU TOUR" : `ÉTAPE ${r.stage} / ${r.stages}`;
+  $("tour-title").textContent = r.name;
+  const tag = (x) => riderTag(x.name, x.team);
+
+  const final = $("tour-final");
+  final.innerHTML = "";
+  final.classList.toggle("hidden", !r.final);
+  if (r.final) {
+    final.append(tourTable("Classement du Tour (Points de Tour)", r.final.ranking.map((t, i) =>
+      [`${i + 1}.`, el("b", { style: `color:${TEAM_TEXT[t.team]}` }, t.label), `${t.points} PT`, { wide: t.detail }])));
+    final.append(el("div", { class: "winner", style: `color:${TEAM_TEXT[r.final.winner_team]}` },
+      `★ ${r.final.winner} remporte le Tour !`));
+  }
+
+  const col1 = $("tour-col1"), col2 = $("tour-col2"), col3 = $("tour-col3");
+  for (const col of [col1, col2, col3]) col.innerHTML = "";
+  col1.append(tourTable("Arrivée de l'étape", r.arrival.map((x, i) => [`${i + 1}.`, tag(x), x.time, x.gap])));
+  col1.append(tourTable("Jetons pris", r.tokens.map((x) => [tag(x), x.text])));
+  col2.append(tourTable(r.finished ? "Classement général final" : "Classement général (temps)",
+    r.gc.map((x, i) => [`${i + 1}.`, tag(x), x.time, x.gap, x.jersey ? jerseyDot(x.jersey) : ""])));
+  col2.append(tourTable("Maillots", r.jerseys.map((x) => [jerseyDot(x.jersey), x.label, tag(x)])));
+  if (!r.finished) {
+    col3.append(tourTable("Points de Tour (podiums + repos)", r.points.map((t) =>
+      [el("b", { style: `color:${TEAM_TEXT[t.team]}` }, t.label), `${t.points} PT`, { wide: t.detail }])));
+  }
+  col3.append(tourTable("Sprint", r.sprint.map((x) => [tag(x), `${x.points} pts`])));
+  col3.append(tourTable("Montagne", r.mountain.map((x) => [tag(x), `${x.points} pts`])));
+  $("tour-notes").innerHTML = "";
+  for (const note of r.notes) $("tour-notes").append(el("div", {}, note));
+
+  const next = $("tour-next");
+  next.classList.toggle("hidden", r.finished);
+  next.textContent = `Étape ${r.stage + 1} : ${r.next || ""} ▶`;
+  next.disabled = !state.me.teams.length;
+  next.title = state.me.teams.length ? "" : "Les spectateurs ne font pas avancer le Tour";
+  const quit = $("tour-quit");
+  quit.classList.toggle("hidden", !state.me.host);
+  quit.textContent = r.finished ? "Revenir au salon" : "⟵ Abandonner le Tour";
+  quit.classList.toggle("primary", r.finished);
+}
+
+// Pendant une étape du Tour : le numéro de l'étape, les maillots et le haut du général
+function renderTourInfo(race) {
+  const box = $("tour-info");
+  box.innerHTML = "";
+  box.classList.toggle("hidden", !race.tour);
+  if (!race.tour) return;
+  const t = race.tour;
+  box.append(el("span", { class: "stage" }, `Grand Tour · étape ${t.stage}/${t.stages} : ${t.name}`));
+  for (const j of t.jerseys) {
+    box.append(el("span", { title: j.label }, jerseyDot(j.jersey), riderTag(j.name, j.team), ` ${j.detail}`));
+  }
+  if (t.gc.length) {
+    const gc = el("span", { class: "muted" }, "Général : ");
+    t.gc.forEach((g, i) => gc.append(i ? " · " : "", riderTag(g.name, g.team), ` ${g.gap || g.time}`));
+    box.append(gc);
+  }
 }
 
 async function settings(change) {
@@ -859,7 +1021,8 @@ function renderRace(state, previousVersion, hadRace) {
   $("toggle-podium").textContent = session.showPodium ? "⟲ Revoir la course" : "🏆 Voir le podium";
   $("replay").classList.toggle("hidden", !replayActive(race));
   if (replayActive(race)) syncReplayBar(race);
-  $("back-lobby").classList.toggle("hidden", !(race.finished && state.me.host));
+  // dans un Tour, on revient au salon depuis l'écran des résultats (« Abandonner le Tour »)
+  $("back-lobby").classList.toggle("hidden", !(race.finished && state.me.host && !race.tour));
   for (const b of $("camera").querySelectorAll("button")) {
     b.classList.toggle("on", !session.view && b.dataset.camera === session.camera);
   }
@@ -920,6 +1083,12 @@ function renderRace(state, previousVersion, hadRace) {
     (race.action || (race.phase === "breakaway" ? "Enchères de l'échappée…" : "Choix des cartes…"));
   action.disabled = !race.can_act;
   action.onclick = () => advance(race.phase);
+  if (race.finished && race.tour) { // Grand Tour : l'arrivée mène à l'écran des résultats de l'étape
+    action.textContent = race.tour.stage < race.tour.stages ? "Résultats de l'étape ▶" : "Résultats et classement final ▶";
+    action.disabled = !state.me.teams.length;
+    action.onclick = () => tourNext(race.tour.stage, "race", "race-error");
+  }
+  renderTourInfo(race);
 
   // journal
   const log = $("log");
