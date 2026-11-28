@@ -130,7 +130,7 @@ Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». R
 sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
 rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à
-l'arrêt (le vélo se balance quand il roule), recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
+l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent et tombent, recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
 trapu ; vélo avec selle, penché comme la route (nez en l'air en montée, en bas en descente) ; maillot à la couleur de l'équipe, casque et lunettes ; pendant l'aspiration, une
 poche d'air derrière celui qui protège et des traits de vitesse derrière l'aspiré ; après une chute, le vélo
 couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; au clic sur

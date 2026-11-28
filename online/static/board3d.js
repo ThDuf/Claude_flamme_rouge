@@ -25,6 +25,8 @@ const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
 const FIT_MARGIN = 0.92; // vue d'ensemble : le parcours occupe 92 % du cadre
 const RIDER_SCALE = 1.5; // les coureurs un peu plus grands que nature : on les voit de loin
 const DUST_BITS = 40;
+const SWEAT_DROPS = 6; // gouttes de sueur d'un coureur en montée
+const SWEAT = "#bfe3ff";
 const TIRED = "#ef4444"; // phase de fatigue : le maillot vire au rouge, un halo rouge pulse autour du coureur // grains du nuage de poussière d'une chute
 
 const lerp = (a, b, f) => a + (b - a) * f;
@@ -230,6 +232,7 @@ const parts = {
   })(),
   crank: new THREE.BoxGeometry(CRANK, 0.008, 0.008),
   pedal: new THREE.BoxGeometry(0.03, 0.008, 0.03),
+  drop: (() => { const g = new THREE.SphereGeometry(0.01, 8, 6); g.scale(1, 1.6, 1); return g; })(), // goutte allongée
   shadow: new THREE.CircleGeometry(0.16, 20),
   ring: new THREE.RingGeometry(0.2, 0.25, 28),
   halo: new THREE.SphereGeometry(0.26, 20, 14),
@@ -387,6 +390,16 @@ class RiderView {
     this.pulse.position.y = LINE_LIFT * 4;
     this.slope.add(this.pulse);
 
+    // montée : des gouttes de sueur perlent du visage et tombent
+    this.sweat = Array.from({ length: SWEAT_DROPS }, (_, i) => {
+      const drop = new THREE.Mesh(parts.drop, new THREE.MeshBasicMaterial({ color: SWEAT, transparent: true,
+                                                                            opacity: 0.9, depthWrite: false }));
+      drop.userData = { phase: rnd(i * 13 + r.team), side: (i % 2 ? 1 : -1) * (0.012 + rnd(i * 7) * 0.02),
+                        speed: 0.9 + rnd(i * 3 + r.name.length) * 0.5 };
+      this.model.add(drop);
+      return drop;
+    });
+
     this.crank = rnd(r.name.length + r.team) * Math.PI * 2;
     this.wheel = 0;
     this.last = null;
@@ -420,6 +433,7 @@ class RiderView {
     this.pose3d(rock);
 
     this.fall(crashed, t);
+    this.perspire(square.kind === "A" && !crashed, t);
     this.ring.visible = current || crashed;
     this.ring.material.color.set(crashed ? CRASH_MARK : CURRENT_RING);
     this.tag.classList.toggle("crashed", crashed);
@@ -467,6 +481,26 @@ class RiderView {
       stretch(leg.thigh, v(hip[0], hip[1], z), v(kn[0], kn[1], z), 1.1);
       stretch(leg.shin, v(kn[0], kn[1], z), v(foot[0], foot[1], z * 1.15), 0.85);
       leg.joint.position.set(kn[0], kn[1], z);
+    }
+  }
+
+  // en montée : chaque goutte part du visage (front, tempes), glisse un peu puis tombe vers la route, et recommence
+  perspire(on, t) {
+    for (const drop of this.sweat) {
+      drop.visible = on;
+      if (!on) continue;
+      const { phase, side, speed } = drop.userData;
+      const life = (t * speed + phase) % 1;
+      const head = this.head.position;
+      const start = [head.x + 0.03, head.y - 0.01]; // sur le visage, sous le casque
+      if (life < 0.25) { // elle perle et glisse le long de la joue
+        const f = life / 0.25;
+        drop.position.set(start[0] + 0.005 * f, start[1] - 0.03 * f, side);
+      } else { // elle tombe (accélérée), en reculant un peu avec la vitesse
+        const f = (life - 0.25) / 0.75;
+        drop.position.set(start[0] + 0.005 - 0.04 * f, start[1] - 0.03 - (start[1] - 0.06) * f * f, side * (1 + f));
+      }
+      drop.material.opacity = life > 0.9 ? (1 - life) * 9 : 0.9;
     }
   }
 
