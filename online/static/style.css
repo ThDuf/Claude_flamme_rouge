@@ -223,23 +223,31 @@ a.room-chip { color: var(--text); text-decoration: none; }
 /* grand écran : la main à gauche du plateau, le bouton d'action et le journal à droite (l'espace sur les côtés
    servait à rien) ; le plateau peut alors prendre toute la hauteur. Écran partagé (body.tv) : pas de main, inchangé. */
 @media (min-width: 1500px) {
+  /* l'écran de course prend toute la hauteur de la fenêtre (sous l'en-tête) ; le plateau prend toute la hauteur
+     qui reste au milieu, le profil juste dessous, les boutons (caméra, 3D, animations) tout en bas */
   body:not(.tv) #race.screen {
     max-width: none; display: grid; column-gap: 18px; align-items: start;
+    height: calc(100vh - 54px); padding-bottom: 12px;
     padding-right: 52px; /* l'onglet « Deck », collé au bord droit, ne cache pas le journal */
     grid-template-columns: minmax(330px, 360px) minmax(0, 1fr) minmax(300px, 380px);
-    grid-template-rows: auto auto auto auto auto auto 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
     grid-template-areas: "head head head" "tour tour tour" "hand board right" "hand tools right" "hand replay right"
                          "hand revealed right" "hand error right";
   }
   body:not(.tv) #race > .race-head { grid-area: head; }
   body:not(.tv) #race > #tour-info { grid-area: tour; }
-  body:not(.tv) #race > .board { grid-area: board; width: 100%; max-width: calc((100vh - 200px) * 1000 / 530); }
+  body:not(.tv) #race > .board { grid-area: board; align-self: stretch; width: 100%; max-width: none; min-height: 0;
+                                 display: flex; flex-direction: column; }
+  /* la carte remplit la place : la 3D occupe tout ; le dessin 2D garde ses proportions, centré */
+  body:not(.tv) #race #map-layer { flex: 1; min-height: 0; }
+  body:not(.tv) #race #map, body:not(.tv) #race #map-fx { width: 100%; height: 100%; object-fit: contain; }
   body:not(.tv) #race > .tools { grid-area: tools; }
   body:not(.tv) #race > #replay { grid-area: replay; }
   body:not(.tv) #race > #revealed { grid-area: revealed; }
   body:not(.tv) #race > #race-error { grid-area: error; }
   body:not(.tv) #race > .race-bottom { display: contents; }
-  body:not(.tv) #race .hand { grid-area: hand; margin: 0; }
-  body:not(.tv) #race .race-right { grid-area: right; }
-  body:not(.tv) #race .log { height: calc(100vh - 250px); min-height: 220px; } /* + le bouton dessous */
+  body:not(.tv) #race .hand { grid-area: hand; margin: 0; max-height: 100%; overflow-y: auto; }
+  /* à droite : le journal sur toute la hauteur, le bouton de l'étape suivante en bas */
+  body:not(.tv) #race .race-right { grid-area: right; align-self: stretch; min-height: 0; }
+  body:not(.tv) #race .log { flex: 1; height: auto; min-height: 120px; }
 }

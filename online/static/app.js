@@ -744,7 +744,10 @@ function setView(view) {
 function mapPoint(event) { // position de la souris en coordonnées du plateau (1000 × 430)
   const canvas = $("map"), [w, h] = session.state.race.size;
   const rect = canvas.getBoundingClientRect();
-  return [((event.clientX - rect.left) / rect.width) * w, ((event.clientY - rect.top) / rect.height) * h];
+  // le dessin garde ses proportions dans sa boîte (grand écran : object-fit contain) : on retire les marges
+  const k = Math.min(rect.width / w, rect.height / h);
+  const left = rect.left + (rect.width - w * k) / 2, top = rect.top + (rect.height - h * k) / 2;
+  return [(event.clientX - left) / k, (event.clientY - top) / k];
 }
 
 function currentView() {
