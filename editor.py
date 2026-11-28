@@ -3,7 +3,7 @@
     python editor.py                     # démarre avec un parcours d'exemple
     python editor.py mon_parcours.json   # ouvre un parcours enregistré
 
-Les parcours enregistrés (dossier « parcours ») apparaissent dans le menu : python main.py
+Les parcours enregistrés (dossier « parcours ») apparaissent dans le menu : python main.py --tk (et dans le jeu web : python main.py)
 Pour jouer un fichier directement :  python gui.py --track mon_parcours.json
 """
 import argparse

@@ -29,6 +29,7 @@ const session = { code: null, token: null, version: 0, camera: "", showPodium: t
                   replay: { t: 0, playing: false, last: 0 }, // revoir la course : position dans l'historique
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
+                  secret: false, uncovered: "", // même écran : main cachée, et la main que l'équipe a dévoilée
                   watch: false }; // écran partagé : la course sans aucune information d'un joueur
 
 function store(key, value) {
@@ -263,10 +264,18 @@ function renderLobby(state) {
       who.append(el("span", { class: "muted" }, session.info.seat_kinds[seat.kind]));
     }
     row.append(who);
+    const mine = state.me.teams.includes(seat.team);
     if (seat.kind === "joueur" && !seat.player) {
-      row.append(el("button", { onclick: () => seatAction(seat.team) }, "Prendre"));
-    } else if (seat.player === state.me.name) {
-      row.append(el("button", { onclick: () => seatAction(null) }, "Quitter"));
+      row.append(el("button", { onclick: () => seatAction(seat.team) },
+        state.me.teams.length ? "Changer" : "Prendre"));
+      if (state.me.teams.length) {
+        row.append(el("button", { title: "Cette équipe se joue aussi sur cet appareil",
+          onclick: () => seatAction(seat.team, { also: true }) }, "+ Ici aussi"));
+      }
+    } else if (mine) {
+      row.append(state.me.teams.length > 1 ?
+        el("button", { onclick: () => seatAction(seat.team, { drop: true }) }, "Lâcher") :
+        el("button", { onclick: () => seatAction(null) }, "Quitter"));
     }
     if (host) {
       const select = el("select", { onchange: (ev) => changeSeat(seat.team, ev.target.value) });
@@ -281,7 +290,10 @@ function renderLobby(state) {
     seats.append(row);
   }
   $("players").textContent = state.players.map((p) => p.name + (p.host ? " (hôte)" : "") +
-    (p.team == null ? " · spectateur" : "")).join(", ");
+    (p.team == null ? " · spectateur" : p.teams.length > 1 ? ` · ${p.teams.length} équipes sur un écran` : ""))
+    .join(", ");
+  $("secret-row").classList.toggle("hidden", state.me.teams.length < 2);
+  $("secret").checked = session.secret;
 
   $("host-settings").classList.toggle("hidden", !host);
   $("guest-settings").textContent = host ? "" :
@@ -341,9 +353,40 @@ async function changeSeat(team, kind) {
   settings({ seats });
 }
 
-async function seatAction(team) {
+async function seatAction(team, options = {}) {
   showError("lobby-error", null);
-  try { await api("/api/seat", { team }); poll(); } catch (e) { showError("lobby-error", e); }
+  try { await api("/api/seat", { team, ...options }); poll(); } catch (e) { showError("lobby-error", e); }
+}
+
+// ------------------------------------------------------------------ même écran, main cachée
+// Plusieurs équipes jouées sur cet appareil : avec l'option « main cachée », on ne montre les cartes que d'une
+// équipe à la fois, après un écran « passe l'appareil » (comme l'option --secret de la version de bureau).
+
+function secretActive(state) {
+  return session.secret && state.me.teams.length > 1;
+}
+
+// L'équipe dont la main est à l'écran : celle qui doit choisir maintenant (ordre des équipes du joueur).
+function activeTeam(race) {
+  if (race.bid) return race.bid.stage === "rider" ? race.bid.riders[0].team : race.rider.team;
+  return race.hands.length ? race.hands[0].team : null;
+}
+
+// Rien n'est montré tant que l'équipe n'a pas cliqué « Voir mes cartes » pour ce choix-là.
+function coverKey(race, team) {
+  return `${race.turn}|${race.phase}|${team}|` + (race.bid ? `${race.bid.stage}${race.bid.round || ""}` : "");
+}
+
+function renderCover(race, team) {
+  const hand = $("hand");
+  hand.innerHTML = "";
+  hand.classList.add("stacked");
+  $("hand-title").innerHTML = "";
+  $("hand-title").append("Passe l'appareil à l'", el("b", { style: `color:${TEAM_TEXT[team]}` },
+    `équipe ${team + 1}`), ".");
+  hand.append(el("button", { class: "primary big validate",
+    onclick: () => { session.uncovered = coverKey(race, team); renderRace(session.state); } },
+    `Équipe ${team + 1} : voir mes cartes`));
 }
 
 // ------------------------------------------------------------------ animations (mouvement, aspiration, météo)
@@ -837,7 +880,13 @@ function renderRace(state, previousVersion, hadRace) {
   const hand = $("hand");
   hand.innerHTML = "";
   hand.classList.remove("stacked");
-  if (race.bid && race.bid.stage === "rider") { // variante Échappée : quel coureur tente l'échappée ?
+  // même écran avec main cachée : une seule équipe à la fois, et seulement après « voir mes cartes »
+  const secret = secretActive(state);
+  const team = secret && !race.finished ? activeTeam(race) : null;
+  const shown = (t) => !secret || (team != null && t === team && session.uncovered === coverKey(race, team));
+  if (team != null && !shown(team)) {
+    renderCover(race, team);
+  } else if (race.bid && race.bid.stage === "rider") { // variante Échappée : quel coureur tente l'échappée ?
     $("hand-title").textContent = "Échappée : quel coureur la tente ? (2 cartes misées, 2 cartes Fatigue s'il part)";
     const row = el("div", { class: "bid-riders" });
     for (const r of race.bid.riders) {
@@ -854,15 +903,15 @@ function renderRace(state, previousVersion, hadRace) {
         card.label));
     }
   } else if (race.hands.length) { // choix simultané : une main par coureur, validées ensemble
-    renderHands(race);
+    renderHands(team != null ? { ...race, hands: race.hands.filter((h) => h.team === team) } : race);
   } else {
     $("hand-title").textContent = state.me.team == null ? "Tu regardes la course (spectateur)." :
       race.phase === "choose" ? "Tes cartes sont posées. En attente des autres joueurs…" :
       race.phase === "breakaway" ? "En attente des autres joueurs…" :
       "Tes mains apparaîtront au prochain tour.";
   }
-  renderDecks(race);
-  $("my-riders").textContent = race.my_riders.map((r) =>
+  renderDecks(secret ? { ...race, decks: race.decks.filter((d) => shown(d.team)) } : race);
+  $("my-riders").textContent = race.my_riders.filter((r) => shown(r.team)).map((r) =>
     `${r.name} : case ${r.position} · pioche ${r.draw} · recyclage ${r.recycle} · fatigue ${r.fatigue}`).join("   —   ");
 
   // bouton d'action partagé
@@ -957,7 +1006,7 @@ function startWatching(code) {
 
 function setDeckOpen(open) {
   session.deckOpen = open;
-  if (session.state && session.state.race) renderDecks(session.state.race);
+  if (session.state && session.state.race) renderRace(session.state); // filtre la main cachée compris
   $("deck-tab").classList.toggle("on", open);
   $("deck-tab").setAttribute("aria-expanded", open ? "true" : "false");
   store("fr-deck", open ? "1" : "0");
@@ -1063,6 +1112,12 @@ async function start() {
     store("fr-animate", session.animate ? "1" : "0");
     if (!session.animate && session.anim) { session.anim = null; drawBoard(); }
     paintToggle();
+  });
+  // même écran : option « main cachée », réglage propre à ce navigateur
+  session.secret = load("fr-secret") === "1";
+  $("secret").addEventListener("change", () => {
+    session.secret = $("secret").checked;
+    store("fr-secret", session.secret ? "1" : "0");
   });
   setupZoom();
   requestAnimationFrame(frame);

@@ -71,6 +71,16 @@ class Player:
     token: str
     name: str
     team: Optional[int] = None  # place prise (numéro d'équipe), ou None : spectateur
+    # même écran : les autres équipes jouées depuis le même appareil (à tour de rôle, ou main cachée)
+    extra: set = field(default_factory=set)
+
+    @property
+    def teams(self) -> list[int]:
+        """Toutes les équipes de ce joueur, la sienne d'abord."""
+        return ([self.team] if self.team is not None else []) + sorted(self.extra - {self.team})
+
+    def owns(self, team: Optional[int]) -> bool:
+        return team is not None and (team == self.team or team in self.extra)
 
 
 def online_choices() -> list[Choice]:
@@ -173,7 +183,7 @@ class Room:
             raise OnlineError("La course est déjà lancée.")
 
     def owner(self, team: int) -> Optional[Player]:
-        return next((p for p in self.players.values() if p.team == team), None)
+        return next((p for p in self.players.values() if p.owns(team)), None)
 
     def team_label(self, team: int) -> str:
         """« Équipe 1 (Alice) », « Équipe 2 (IA) »…"""
@@ -205,14 +215,28 @@ class Room:
         self.bump()
         return player
 
-    def take_seat(self, player: Player, team: Optional[int]) -> None:
+    def take_seat(self, player: Player, team: Optional[int], also: bool = False, drop: bool = False) -> None:
+        """Prend la place `team` (None : redevient spectateur et lâche toutes ses places).
+        `also` : même écran, la place s'ajoute à celles du joueur ; `drop` : lâche seulement cette place."""
         self._require_lobby()
+        if drop:
+            if team == player.team:
+                player.team = min(player.extra - {team}, default=None)
+            player.extra.discard(team)
+            player.extra.discard(player.team)
+            self.bump()
+            return
         if team is not None:
             if not (0 <= team < self.teams) or self.seats[team] != SEAT_PLAYER:
                 raise OnlineError("Cette place n'est pas jouable par un joueur.")
             if self.owner(team) not in (None, player):
                 raise OnlineError("Cette place est déjà prise.")
-        player.team = team
+        if also and team is not None and player.team is not None:
+            if team != player.team:
+                player.extra.add(team)
+        else:
+            player.team = team
+            player.extra = set()
         self.bump()
 
     def breakaway_available(self) -> bool:
@@ -249,8 +273,10 @@ class Room:
         if PELOTON not in self.extensions:  # sans Peloton, pas d'équipe fantôme
             self.seats = [SEAT_PLAYER if s in (TEAM_PELOTON, TEAM_MUSCLE) else s for s in self.seats]
         for p in self.players.values():
+            p.extra = {t for t in p.extra if t < self.teams and self.seats[t] == SEAT_PLAYER}
             if p.team is not None and (p.team >= self.teams or self.seats[p.team] != SEAT_PLAYER):
-                p.team = None
+                p.team = min(p.extra, default=None)
+            p.extra.discard(p.team)
         self.bump()
 
     def start(self, player: Player, seed: Optional[int] = None) -> None:
@@ -283,11 +309,11 @@ class Room:
     def bid_rider(self, player: Player, name: Optional[str]) -> None:
         """Variante Échappée : l'équipe dont c'est le tour choisit le coureur qui tente l'échappée, ou passe."""
         ctl = self._running()
-        if ctl.phase != BREAKAWAY or ctl.bid_team != player.team or ctl.bid_rider is not None:
+        if ctl.phase != BREAKAWAY or not player.owns(ctl.bid_team) or ctl.bid_rider is not None:
             raise OnlineError("Ce n'est pas à toi de choisir pour l'échappée.")
         rider = None
         if name is not None:
-            rider = next((r for r in self.game.riders if r.team == player.team and r.name == name), None)
+            rider = next((r for r in self.game.riders if r.team == ctl.bid_team and r.name == name), None)
             if rider is None:
                 raise OnlineError("Ce coureur n'est pas dans ton équipe.")
         ctl.choose_bid_rider(rider)
@@ -297,7 +323,7 @@ class Room:
         """Variante Échappée : la carte misée par l'équipe qui enchérit."""
         ctl = self._running()
         rider = ctl.current_rider
-        if ctl.phase != BREAKAWAY or rider is None or rider.team != player.team:
+        if ctl.phase != BREAKAWAY or rider is None or not player.owns(rider.team):
             raise OnlineError("Ce n'est pas à toi de miser.")
         if not 0 <= int(index) < len(ctl.hand):
             raise OnlineError("Carte inconnue.")
@@ -313,7 +339,7 @@ class Room:
         picks = []
         for name, index in choices.items():
             rider = next((r for r in ctl.hands if r.name == str(name)), None)
-            if rider is None or rider.team != player.team:
+            if rider is None or not player.owns(rider.team):
                 raise OnlineError(f"{name} n'a pas de carte à choisir.")
             hand = ctl.hands[rider]
             if not 0 <= int(index) < len(hand):
@@ -327,7 +353,7 @@ class Room:
         """Mouvement, aspiration ou fatigue : n'importe quel joueur assis peut lancer l'étape suivante. `phase` est
         celle que le joueur voyait : si quelqu'un a déjà cliqué, on ne recommence pas."""
         ctl = self._running()
-        if player.team is None:
+        if not player.teams:
             raise OnlineError("Les spectateurs ne peuvent pas faire avancer la course.")
         if phase != ctl.phase or ctl.phase not in ACTION_TEXT:
             return
@@ -356,8 +382,9 @@ class Room:
         base = {
             "version": self.version,
             "code": self.code,
-            "me": {"name": player.name, "team": player.team, "host": player.token == self.host},
-            "players": [{"name": p.name, "team": p.team, "host": p.token == self.host} for p in self.players.values()],
+            "me": {"name": player.name, "team": player.team, "teams": player.teams, "host": player.token == self.host},
+            "players": [{"name": p.name, "team": p.team, "teams": p.teams, "host": p.token == self.host}
+                        for p in self.players.values()],
         }
         if self.game is None:
             base["lobby"] = self._lobby_state()
@@ -431,14 +458,15 @@ class Room:
                                      for label, where in ctl.history]
             self._cache[key] = shared
         shared = self._cache[key]
-        my_hands = [(r, h) for r, h in ctl.hands.items() if r.team == player.team] if ctl.phase == CHOOSE else []
-        my_turn = bool(my_hands) or (ctl.phase == BREAKAWAY and rider is not None and rider.team == player.team)
+        my_hands = [(r, h) for r, h in ctl.hands.items() if player.owns(r.team)] if ctl.phase == CHOOSE else []
+        my_hands.sort(key=lambda rh: (player.teams.index(rh[0].team), rh[0].name))
+        my_turn = bool(my_hands) or (ctl.phase == BREAKAWAY and rider is not None and player.owns(rider.team))
         bid = None  # variante Échappée : ce que voit l'équipe qui enchérit
         if ctl.phase == BREAKAWAY:
             team = ctl.bid_team
             owner = self.owner(team) if team is not None else None
             if rider is None and team is not None:  # l'équipe choisit son coureur, ou passe
-                mine_now = team == player.team
+                mine_now = player.owns(team)
                 waiting = ("À toi : quel coureur tente l'échappée ?" if mine_now
                            else f"Échappée : {self.team_label(team)} choisit son coureur…")
                 if mine_now:
@@ -453,7 +481,7 @@ class Room:
                 waiting = ""
         elif ctl.phase == CHOOSE:
             late = sorted({(self.owner(r.team).name if self.owner(r.team) else "IA") for r in ctl.hands
-                           if r.team != player.team})
+                           if not player.owns(r.team)})
             if my_turn:
                 waiting = "À toi : choisis une carte pour chacun de tes coureurs"
             else:
@@ -462,14 +490,14 @@ class Room:
             waiting = "Toutes les cartes sont posées." if ctl.phase == MOVEMENT else "Regarde le plateau, puis continue."
         else:
             waiting = ""
-        mine = [r for r in g.riders if r.team == player.team]
+        mine = sorted((r for r in g.riders if player.owns(r.team)), key=lambda r: player.teams.index(r.team))
         return {
             "turn": g.turn + 1,
             "phase": ctl.phase,
             "title": PHASE_TITLES.get(ctl.phase, ""),
             "waiting": waiting,
             "action": ACTION_TEXT.get(ctl.phase, ""),
-            "can_act": ctl.phase in ACTION_TEXT and player.team is not None,
+            "can_act": ctl.phase in ACTION_TEXT and bool(player.teams),
             "my_turn": my_turn,
             "bid": bid,
             "rider": {"name": rider.name, "team": rider.team, "position": rider.position} if rider else None,
@@ -481,7 +509,7 @@ class Room:
                       for r, h in my_hands],
             "decks": [{"name": r.name, "team": r.team, "kind": r.kind, "cards": self.initial_decks.get(r.name, [])}
                       for r in mine if r.name in self.initial_decks],
-            "my_riders": [{"name": r.name, "position": r.position, "draw": len(r.draw_pile), "recycle": len(r.recycle),
+            "my_riders": [{"name": r.name, "team": r.team, "position": r.position, "draw": len(r.draw_pile), "recycle": len(r.recycle),
                            "fatigue": sum(c.exhaustion for c in r.draw_pile + r.recycle + r.hand)} for r in mine],
             "revealed": [{"name": r.name, "team": r.team, "card": str(c), "who": self._who(r)}
                          for r, c in sorted(ctl.last_revealed.items(), key=lambda rc: (rc[0].team, rc[0].name))],

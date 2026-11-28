@@ -26,7 +26,7 @@ def test_room_creation_seats_and_settings():
     api = Api()
     code, alice, bob = lobby_of_two(api)
     state = call(api, "/api/state", "GET", code=code, token=alice)
-    assert state["me"] == {"name": "Alice", "team": 0, "host": True}
+    assert state["me"] == {"name": "Alice", "team": 0, "teams": [0], "host": True}
     seats = state["lobby"]["seats"]
     assert [s["player"] for s in seats] == ["Alice", "Bob"]
     assert "map" in state["lobby"]["preview"] and "/" not in state["lobby"]["parcours"].split(":", 1)[0]
@@ -305,3 +305,56 @@ def test_finished_race_sends_its_history_for_the_replay():
     dots = lambda prims: [p for p in prims if p[0] == "oval" and p[6] == "#ffffff"]  # noqa: E731
     assert len(dots(race["profile"])) == len(names) and dots(race["profile_base"]) == []
     assert not any(p[0] == "text" and "PELOTON" in str(p[3]) for p in race["profile_base"])
+
+
+def test_same_screen_one_player_holds_several_teams():
+    """Même écran : l'hôte prend aussi les autres places ; il voit et joue les mains de toutes ses équipes."""
+    api = Api()
+    host = call(api, "/api/create", name="Alice")
+    code, alice = host["code"], host["token"]
+    call(api, "/api/settings", code=code, token=alice, teams=3)
+    call(api, "/api/seat", code=code, token=alice, team=1, also=True)
+    call(api, "/api/seat", code=code, token=alice, team=2, also=True)
+    state = call(api, "/api/state", "GET", code=code, token=alice)
+    assert state["me"]["teams"] == [0, 1, 2]
+    assert [s["player"] for s in state["lobby"]["seats"]] == ["Alice"] * 3
+    guest = call(api, "/api/join", code=code, name="Bob")["token"]
+    with pytest.raises(OnlineError):  # une place tenue sur le même écran n'est plus libre
+        call(api, "/api/seat", code=code, token=guest, team=1)
+    call(api, "/api/seat", code=code, token=alice, team=1, drop=True)  # lâche seulement l'équipe 2
+    assert call(api, "/api/state", "GET", code=code, token=alice)["me"]["teams"] == [0, 2]
+    call(api, "/api/seat", code=code, token=guest, team=1)
+    call(api, "/api/settings", code=code, token=alice, teams=2)  # l'équipe 3 disparaît : la place est lâchée
+    assert call(api, "/api/state", "GET", code=code, token=alice)["me"]["teams"] == [0]
+    call(api, "/api/seat", code=code, token=guest, team=None)
+    call(api, "/api/seat", code=code, token=alice, team=1, also=True)
+
+    call(api, "/api/start", code=code, token=alice)
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    assert race["my_turn"] and sorted({h["team"] for h in race["hands"]}) == [0, 1]
+    assert len(race["hands"]) == 4 and len(race["decks"]) == 4
+    assert call(api, "/api/state", "GET", code=code, token=guest)["race"]["hands"] == []  # Bob regarde
+    call(api, "/api/cards", code=code, token=alice, choices={h["name"]: 0 for h in race["hands"]})
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    assert race["hands"] == [] and race["can_act"]
+    for _ in range(400):
+        race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+        if race["phase"] == FINISHED:
+            break
+        if race["hands"]:
+            call(api, "/api/cards", code=code, token=alice, choices={h["name"]: 0 for h in race["hands"]})
+        else:
+            call(api, "/api/advance", code=code, token=alice, phase=race["phase"])
+    assert race["phase"] == FINISHED and race["winner"]
+
+
+def test_local_launcher_server_takes_a_free_port():
+    """python main.py : le serveur local prend un port libre, sur ce PC seulement."""
+    from online.server import start_server
+
+    httpd = start_server("127.0.0.1", 0)
+    try:
+        host, port = httpd.server_address[:2]
+        assert host == "127.0.0.1" and port > 0
+    finally:
+        httpd.server_close()

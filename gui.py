@@ -1,6 +1,6 @@
 """Interface de jeu (tkinter, inclus avec Python).
 
-Le plus simple est de passer par le menu :   python main.py
+Le plus simple est de passer par le menu :   python main.py --tk
 
 Lancement direct, sans menu :
     python gui.py              # 2 équipes

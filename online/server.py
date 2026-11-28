@@ -90,7 +90,8 @@ class Api:
                 raise OnlineError("Action inconnue.")
             if path == "/api/seat":
                 team = body.get("team")
-                room.take_seat(player, None if team is None else int(team))
+                room.take_seat(player, None if team is None else int(team), also=bool(body.get("also")),
+                               drop=bool(body.get("drop")))
             elif path == "/api/settings":
                 room.configure(player, body.get("parcours"), body.get("teams"), body.get("extensions"),
                                body.get("seats"), body.get("breakaway"))
@@ -182,15 +183,20 @@ class GameServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
 
-def serve(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
-    api = Api()
+def start_server(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> GameServer:
+    """Le serveur prêt à écouter (port 0 : un port libre, voir `server_address`). Quitte si le port est pris."""
     try:
-        httpd = GameServer((host, port), make_handler(api))
+        httpd = GameServer((host, port), make_handler(Api()))
     except OSError:
         print(f"Le port {port} est déjà utilisé : un serveur Flamme Rouge tourne sans doute déjà "
               f"(ferme sa fenêtre), ou choisis-en un autre avec --port.")
         sys.exit(1)
     httpd.daemon_threads = True
+    return httpd
+
+
+def serve(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
+    httpd = start_server(host, port)
     shown = "127.0.0.1" if host in ("127.0.0.1", "0.0.0.0") else host
     print(f"Flamme Rouge en ligne : http://{shown}:{port}  (Ctrl+C pour arrêter)")
     try:

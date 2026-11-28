@@ -1,16 +1,20 @@
-"""Point d'entrée : le menu, puis la course.
+"""Point d'entrée.
 
-    python main.py
+    python main.py          # le jeu dans le navigateur : un serveur sur ce PC, puis la page s'ouvre
+    python main.py --tk     # l'ancienne interface de bureau (tkinter) : le menu, puis la course
+
+Dans le navigateur, une seule personne crée la partie ; « + Ici aussi » ajoute d'autres équipes jouées sur le même
+écran (avec l'option « main cachée »), et d'autres appareils du réseau peuvent rejoindre avec le code.
 """
-import tkinter as tk
+import argparse
+import threading
+import webbrowser
 
-from gui import App
 from flamme_rouge.tour import Tour, TourStage
-from menu import MenuScreen
 
 
 class Launcher:
-    """Fait passer la fenêtre du menu à la course, et inversement."""
+    """Interface tkinter : fait passer la fenêtre du menu à la course, et inversement."""
 
     def __init__(self, root):
         self.root = root
@@ -18,6 +22,8 @@ class Launcher:
         self.app = None
 
     def _reset(self) -> None:
+        import tkinter as tk
+
         if self.app is not None:
             self.app.close()  # arrête l'animation et ferme la fenêtre des decks
             self.app = None
@@ -27,12 +33,16 @@ class Launcher:
         self.container.pack(fill="both", expand=True)
 
     def show_menu(self) -> None:
+        from menu import MenuScreen
+
         self._reset()
         self.tour = None
         MenuScreen(self.container, self.start_game, self.start_tour)
 
     def start_game(self, track, teams: int, secret: bool, animate: bool, extensions=(), ai_teams=(), team_types=None,
                    breakaway: bool = False) -> None:
+        from gui import App
+
         self._reset()
         self.app = App(self.container, teams=teams, secret=secret, track=track, on_menu=self.show_menu, animate=animate,
                        extensions=extensions, ai_teams=ai_teams, team_types=team_types, breakaway=breakaway)
@@ -48,6 +58,8 @@ class Launcher:
         self.play_stage()
 
     def play_stage(self) -> None:
+        from gui import App
+
         self._reset()
         s = self.tour_settings
         game = self.tour.start_stage()
@@ -85,10 +97,41 @@ class Launcher:
         FinalScreen(self.container, self.tour, self.team_names, self.show_menu).pack(fill="both", expand=True)
 
 
-def main() -> None:
+def main_tk() -> None:
+    import tkinter as tk
+
     root = tk.Tk()
     Launcher(root).show_menu()
     root.mainloop()
+
+
+def main_browser(port: int = 0, open_browser: bool = True) -> None:
+    """Serveur sur ce PC seulement (127.0.0.1), sur un port libre si `port` vaut 0, puis la page du jeu."""
+    from online.server import start_server
+
+    httpd = start_server("127.0.0.1", port)
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    print(f"Flamme Rouge : {url}  (laisse cette fenêtre ouverte ; Ctrl+C pour arrêter)")
+    if open_browser:
+        threading.Timer(0.3, webbrowser.open, [url]).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("Serveur arrêté.")
+    finally:
+        httpd.server_close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Flamme Rouge")
+    parser.add_argument("--tk", action="store_true", help="l'ancienne interface de bureau (tkinter)")
+    parser.add_argument("--port", type=int, default=0, help="port du serveur local (défaut : un port libre)")
+    parser.add_argument("--no-browser", action="store_true", help="ne pas ouvrir le navigateur")
+    args = parser.parse_args()
+    if args.tk:
+        main_tk()
+    else:
+        main_browser(args.port, not args.no_browser)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,17 @@ mémoire). Les parcours enregistrés avec l'éditeur sur ton PC ne sont pas prop
 Pour essayer une modification sur ton PC avant de la pousser : `python -m online.server`, puis
 `http://127.0.0.1:8770` (le serveur n'écoute alors que ce PC).
 
+## Jouer sur ce PC
+
+`python main.py` démarre le serveur sur ce PC seulement (un port libre) et ouvre la page dans le navigateur.
+Les parcours enregistrés avec l'éditeur (dossier `parcours/`) y sont proposés. L'ancienne interface de bureau
+reste disponible avec `python main.py --tk`.
+
+**Plusieurs joueurs sur un seul écran** : dans le salon, « + Ici aussi » ajoute une équipe jouée depuis le même
+appareil (« Lâcher » la rend). Avec l'option **Main cachée entre deux équipes**, chaque équipe voit ses cartes
+seulement après un écran « passe l'appareil ». On peut mélanger : deux équipes sur le PC, une troisième sur un
+téléphone qui rejoint avec le code.
+
 ## Une partie
 
 - **Créer une partie** : tu deviens l'hôte. Envoie le lien du salon (il contient le code à 4 lettres) ou le code.

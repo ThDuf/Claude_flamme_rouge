@@ -40,7 +40,11 @@
         <button class="shared-screen player-only" title="Ouvre une fenêtre avec le plateau seulement (ni main ni deck), à montrer à tout le monde : télé, vidéoprojecteur, partage d'écran">📺 Écran partagé</button>
         <h3>Équipes</h3>
         <div id="seats"></div>
-        <p class="muted small">Une place « Joueur » restée libre au départ est jouée par l'IA.</p>
+        <p class="muted small">Une place « Joueur » restée libre au départ est jouée par l'IA.
+          « + Ici aussi » : cette équipe se joue aussi sur cet appareil (plusieurs joueurs, un seul écran).</p>
+        <label class="ext hidden" id="secret-row" title="Avant chaque choix, un écran « passe l'appareil » cache les cartes des autres équipes">
+          <input type="checkbox" id="secret"> Main cachée entre deux équipes
+        </label>
         <h3>Joueurs connectés</h3>
         <div id="players" class="muted"></div>
       </section>
