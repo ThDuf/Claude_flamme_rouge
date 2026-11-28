@@ -187,7 +187,7 @@ function checkerTexture() {
 // Les jambes suivent les pédales (cinématique inverse à deux segments : cuisse et tibia), les roues et le pédalier
 // tournent avec la distance parcourue. Posture : assis (rouleur droit, sprinteur bas et trapu), en danseuse dans
 // les montées, recroquevillé dans les descentes (roue libre, il ne pédale pas). À terre après une chute : le vélo
-// couché d'un côté, le coureur de l'autre, un nuage de poussière.
+// couché d'un côté, le coureur de l'autre, un nuage de poussière. La danseuse reste à l'arrêt dans une montée.
 
 const BB = [0, 0.1]; // le pédalier
 const CRANK = 0.045; // longueur d'une manivelle
@@ -386,8 +386,8 @@ class RiderView {
     this.last = (this.last || new THREE.Vector3()).copy(this.group.position);
     const moving = moved > 1e-4 && !crashed;
     const square = road.squares[Math.min(Math.max(Math.round(p), 0), road.squares.length - 1)];
-    const target = !moving ? this.base : square.kind === "A" ? POSES.danseuse : square.kind === "D" ? POSES.descente
-      : this.base;
+    // en danseuse dans les montées, même à l'arrêt (on voit qui grimpe) ; recroquevillé en descente quand il roule
+    const target = square.kind === "A" ? POSES.danseuse : moving && square.kind === "D" ? POSES.descente : this.base;
     const k = Math.min(1, dt * 6); // la posture change en douceur
     for (const key of ["hip", "shoulder"]) {
       this.pose[key][0] = lerp(this.pose[key][0], target[key][0], k);

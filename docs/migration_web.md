@@ -129,8 +129,8 @@ route seulement s'il ne l'a pas.
 Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage (côtés jusqu'au sol,
 sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
-rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées
-(le vélo se balance), recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
+rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à
+l'arrêt (le vélo se balance quand il roule), recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
 trapu ; maillot à bande claire (rouleur) ou foncée (sprinteur), casque et lunettes ; pendant l'aspiration, une
 poche d'air derrière celui qui protège et des traits de vitesse derrière l'aspiré ; après une chute, le vélo
 couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; pendant la phase de
