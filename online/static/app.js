@@ -16,7 +16,7 @@ const session = { code: null, token: null, version: 0, camera: "", showPodium: t
                   replay: { t: 0, playing: false, last: 0 }, // revoir la course : position dans l'historique
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
-                  secret: false, uncovered: "", // même écran : main cachée, et la main que l'équipe a dévoilée
+                  uncovered: "", // même écran : la main que l'équipe a dévoilée (« voir mes cartes »)
                   watch: false }; // écran partagé : la course sans aucune information d'un joueur
 
 function store(key, value) {
@@ -200,8 +200,6 @@ function renderLobby(state) {
   $("players").textContent = state.players.map((p) => p.name + (p.host ? " (hôte)" : "") +
     (p.team == null ? " · spectateur" : p.teams.length > 1 ? ` · ${p.teams.length} équipes sur un écran` : ""))
     .join(", ");
-  $("secret-row").classList.toggle("hidden", state.me.teams.length < 2);
-  $("secret").checked = session.secret;
 
   const tour = lobby.mode === "tour";
   $("host-settings").classList.toggle("hidden", !host);
@@ -425,10 +423,10 @@ async function seatAction(team, options = {}) {
 
 // ------------------------------------------------------------------ même écran, main cachée
 // Plusieurs équipes jouées sur cet appareil : avec l'option « main cachée », on ne montre les cartes que d'une
-// équipe à la fois, après un écran « passe l'appareil » (comme l'option --secret de la version de bureau).
+// équipe à la fois, après un écran « passe l'appareil ». Toujours actif dès qu'un appareil tient deux équipes.
 
 function secretActive(state) {
-  return session.secret && state.me.teams.length > 1;
+  return state.me.teams.length > 1;
 }
 
 // L'équipe dont la main est à l'écran : celle qui doit choisir maintenant (ordre des équipes du joueur).
@@ -1184,12 +1182,6 @@ async function start() {
     store("fr-animate", session.animate ? "1" : "0");
     if (!session.animate && session.anim) { session.anim = null; drawBoard(); }
     paintToggle();
-  });
-  // même écran : option « main cachée », réglage propre à ce navigateur
-  session.secret = load("fr-secret") === "1";
-  $("secret").addEventListener("change", () => {
-    session.secret = $("secret").checked;
-    store("fr-secret", session.secret ? "1" : "0");
   });
   setupZoom();
   requestAnimationFrame(frame);

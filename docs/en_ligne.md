@@ -32,9 +32,9 @@ Les parcours enregistrés avec l'éditeur (dossier `parcours/`) y sont proposés
 reste disponible avec `python main.py --tk`.
 
 **Plusieurs joueurs sur un seul écran** : dans le salon, « + Ici aussi » ajoute une équipe jouée depuis le même
-appareil (« Lâcher » la rend). Avec l'option **Main cachée entre deux équipes**, chaque équipe voit ses cartes
-seulement après un écran « passe l'appareil ». On peut mélanger : deux équipes sur le PC, une troisième sur un
-téléphone qui rejoint avec le code.
+appareil (« Lâcher » la rend). Les mains restent cachées : chaque équipe voit ses cartes (et son deck) seulement
+après un écran « passe l'appareil ». On peut mélanger : deux équipes sur le PC, une troisième sur un téléphone
+qui rejoint avec le code.
 
 ## Une partie
 
