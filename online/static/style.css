@@ -227,7 +227,7 @@ a.room-chip { color: var(--text); text-decoration: none; }
      qui reste au milieu, le profil juste dessous, les boutons (caméra, 3D, animations) tout en bas */
   body:not(.tv) #race.screen {
     max-width: none; display: grid; column-gap: 18px; align-items: start;
-    height: calc(100vh - 54px); padding-bottom: 12px;
+    height: calc(100vh - 62px); padding-bottom: 12px; /* sous l'en-tête, sans faire défiler la page */
     padding-right: 52px; /* l'onglet « Deck », collé au bord droit, ne cache pas le journal */
     grid-template-columns: minmax(330px, 360px) minmax(0, 1fr) minmax(300px, 380px);
     grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
@@ -237,9 +237,11 @@ a.room-chip { color: var(--text); text-decoration: none; }
   body:not(.tv) #race > .race-head { grid-area: head; }
   body:not(.tv) #race > #tour-info { grid-area: tour; }
   body:not(.tv) #race > .board { grid-area: board; align-self: stretch; width: 100%; max-width: none; min-height: 0;
-                                 display: flex; flex-direction: column; }
+                                 display: flex; flex-direction: column; gap: 14px;
+                                 background: none; border: none; } /* la carte et le profil séparés */
   /* la carte remplit la place : la 3D occupe tout ; le dessin 2D garde ses proportions, centré */
-  body:not(.tv) #race #map-layer { flex: 1; min-height: 0; }
+  body:not(.tv) #race #map-layer { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; background: var(--panel); }
+  body:not(.tv) #race #profile-layer { border-radius: 10px; overflow: hidden; background: var(--panel); }
   body:not(.tv) #race #map, body:not(.tv) #race #map-fx { width: 100%; height: 100%; object-fit: contain; }
   body:not(.tv) #race > .tools { grid-area: tools; }
   body:not(.tv) #race > #replay { grid-area: replay; }
