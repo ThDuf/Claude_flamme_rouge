@@ -204,7 +204,7 @@ const POSES = { // hanche et épaules, dans le repère du vélo
 };
 const SHORTS = "#111827";
 const DUST = "#eadcb8";
-const Y_AXIS = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 const parts = {
   wheel: new THREE.TorusGeometry(WHEEL_R, 0.012, 6, 22),
@@ -213,7 +213,6 @@ const parts = {
   limb: new THREE.CylinderGeometry(0.019, 0.016, 1, 8),
   joint: new THREE.SphereGeometry(0.02, 8, 6),
   torso: new THREE.CapsuleGeometry(0.05, 0.12, 4, 10),
-  band: new THREE.TorusGeometry(0.05, 0.013, 6, 18),
   head: new THREE.SphereGeometry(0.04, 14, 10),
   helmet: new THREE.SphereGeometry(0.048, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
   glasses: new THREE.BoxGeometry(0.018, 0.014, 0.07),
@@ -263,8 +262,6 @@ class RiderView {
     this.pose = { hip: [...this.base.hip], shoulder: [...this.base.shoulder] };
     const lambert = (color) => new THREE.MeshLambertMaterial({ color });
     const team = lambert(fill), skin = lambert(SKIN), dark = lambert(WHEEL), metal = lambert(FRAME);
-    // maillot à deux couleurs : bande claire pour le rouleur, foncée pour le sprinteur
-    const band = lambert(this.sprinter ? fill.clone().multiplyScalar(0.5) : fill.clone().lerp(new THREE.Color("#ffffff"), 0.6));
     const shorts = lambert(SHORTS);
     this.teamMat = team;
     this.teamColor = fill.clone();
@@ -321,10 +318,9 @@ class RiderView {
     }
     this.bike.add(this.crankSet);
 
-    // le coureur : buste, bande du maillot, tête, casque, lunettes, bras, jambes
+    // le coureur : buste, tête, casque, lunettes, bras, jambes
     this.torso = new THREE.Mesh(parts.torso, team);
     this.torso.userData.width = this.sprinter ? 1.18 : 1;
-    this.band = new THREE.Mesh(parts.band, band);
     this.head = new THREE.Group();
     this.head.add(new THREE.Mesh(parts.head, skin));
     const helmet = new THREE.Mesh(parts.helmet, team);
@@ -334,7 +330,7 @@ class RiderView {
     glasses.position.set(0.036, 0.004, 0);
     this.head.add(helmet, glasses);
     this.neck = new THREE.Mesh(parts.limb, skin);
-    this.body.add(this.torso, this.band, this.head, this.neck);
+    this.body.add(this.torso, this.head, this.neck);
     this.arms = [-1, 1].map(() => { const m = new THREE.Mesh(parts.limb, team); this.body.add(m); return m; });
     this.legs = [-1, 1].map((side) => {
       const thigh = new THREE.Mesh(parts.limb, shorts), shin = new THREE.Mesh(parts.limb, skin);
@@ -456,10 +452,6 @@ class RiderView {
     this.body.rotation.x = rock;
     stretch(this.torso, v(...hip), v(...shoulder), this.torso.userData.width);
     this.torso.scale.y /= 0.22; // la capsule mesure 0,22 de haut
-    const chest = v(...hip).lerp(v(...shoulder), 0.62);
-    this.band.position.copy(chest);
-    this.band.quaternion.setFromUnitVectors(Z_AXIS, v(shoulder[0] - hip[0], shoulder[1] - hip[1]).normalize());
-    this.band.scale.setScalar(this.torso.userData.width);
     // la tête posée au bout du buste, un peu au-dessus (le regard vers la route devant), reliée par le cou
     this.head.position.set(shoulder[0] + HEAD_OFFSET[0], shoulder[1] + HEAD_OFFSET[1], 0);
     this.head.rotation.z = -0.25;
