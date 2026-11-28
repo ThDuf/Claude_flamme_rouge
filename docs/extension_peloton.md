@@ -41,6 +41,8 @@ auteur Asger Harding Granerud). Ce texte résume la règle avec nos mots ; il ne
   elles ne participent pas aux enchères de l'échappée.
 - Elles se placent au départ **avant** les joueurs, au plus près de la ligne : le Peloton d'abord
   (ses coureurs l'un devant l'autre), puis Muscle (Sprinteur devant le Rouleur).
+  Les coureurs des joueurs prennent ensuite les places restantes au hasard (dans un Grand Tour, équipe par
+  équipe dans l'ordre des Points de Tour, le hasard ne choisissant que l'ordre des deux coureurs de l'équipe).
 
 ## Ce qui est programmé
 

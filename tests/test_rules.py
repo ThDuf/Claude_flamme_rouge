@@ -261,3 +261,17 @@ def test_random_games_finish_and_keep_invariants(teams, seed):
         assert all(len(g.riders_at(r.position)) <= 2 for r in g.riders)
         assert all(r.position >= before[r] for r in g.riders), "un coureur a reculé"
     assert g.finished and g.winner is not None
+
+
+def test_riders_are_placed_at_random_on_the_start_grid():
+    track = Track("." * 30, start=4)
+
+    def grid(seed):
+        game = Game(track, num_teams=4, seed=seed)
+        return {r.name: (r.position, r.lane) for r in game.riders}
+
+    grids = [grid(seed) for seed in range(12)]
+    assert grids[0] == grid(0)  # même graine, même grille
+    assert len({tuple(sorted(g.items())) for g in grids}) > 6  # sinon, des grilles différentes
+    for g in grids:  # toujours compacte : les 8 places les plus proches de la ligne, une seule fois chacune
+        assert sorted(g.values()) == [(s, lane) for s in range(4) for lane in range(2)]

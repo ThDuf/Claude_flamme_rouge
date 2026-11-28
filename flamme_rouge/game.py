@@ -119,6 +119,7 @@ class Game:
                     rider.draw_pile = list(decks[self.rider_key(rider)])
                     self.rng.shuffle(rider.draw_pile)
         self.team_order = list(team_order) if team_order is not None else list(range(num_teams))
+        self.fixed_team_order = team_order is not None  # Grand Tour : l'ordre des équipes compte au placement
         self._place_riders()
         # Grand Tour
         self.tour = tour
@@ -149,6 +150,9 @@ class Game:
         """Placement au départ : les places les plus proches de la ligne d'abord (case par case, file de droite
         d'abord). Les équipes fantômes se placent avant les joueurs : le Peloton l'un devant l'autre, puis
         Muscle (Sprinteur devant le Rouleur). Sans grille de départ, on remplit les premières cases du parcours.
+        Les coureurs des joueurs prennent ensuite les places restantes au hasard (tirage de la partie : même
+        graine, même grille). Grand Tour : l'équipe qui a le moins de Points de Tour se place d'abord, et le hasard
+        ne décide que de l'ordre de ses deux coureurs.
 
         Si la grille ne suffit pas (5–6 équipes), ses cases reçoivent une 3e file (choix faute de règle)."""
         grid = self.track.start
@@ -183,10 +187,18 @@ class Game:
                 pair = sorted((r for r in self.riders if r.team == team), key=lambda r: r.kind != SPRINTEUR)
                 for rider in pair:
                     put(rider, free()[0])
-        for team in self.team_order:  # Grand Tour : l'équipe qui a le moins de Points de Tour se place d'abord
-            for rider in self.riders:
-                if rider.team == team and self.team_types[team] == TEAM_PLAYER:
-                    put(rider, free()[0])
+        players = [r for r in self.riders if self.team_types[r.team] == TEAM_PLAYER]
+        if self.fixed_team_order:  # Grand Tour : l'équipe qui a le moins de Points de Tour se place d'abord
+            order = []
+            for team in self.team_order:
+                pair = [r for r in players if r.team == team]
+                self.rng.shuffle(pair)
+                order += pair
+        else:  # course simple : tout le monde au hasard sur la grille
+            order = players[:]
+            self.rng.shuffle(order)
+        for rider in order:
+            put(rider, free()[0])
 
     # ------------------------------------------------------------------ outils
 
