@@ -24,7 +24,8 @@ const FOLLOW_DISTANCE = 7; // distance de la caméra au groupe suivi, en cases
 const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
 const FIT_MARGIN = 0.92; // vue d'ensemble : le parcours occupe 92 % du cadre
 const RIDER_SCALE = 1.5; // les coureurs un peu plus grands que nature : on les voit de loin
-const DUST_BITS = 40; // grains du nuage de poussière d'une chute
+const DUST_BITS = 40;
+const TIRED = "#ef4444"; // phase de fatigue : le maillot vire au rouge, un halo rouge pulse autour du coureur // grains du nuage de poussière d'une chute
 
 const lerp = (a, b, f) => a + (b - a) * f;
 const rnd = (seed) => { const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
@@ -219,6 +220,7 @@ const parts = {
   pedal: new THREE.BoxGeometry(0.03, 0.008, 0.03),
   shadow: new THREE.CircleGeometry(0.16, 20),
   ring: new THREE.RingGeometry(0.2, 0.25, 28),
+  halo: new THREE.SphereGeometry(0.26, 20, 14),
   wake: (() => { const g = new THREE.ConeGeometry(0.17, 0.9, 18, 1, true); g.rotateZ(Math.PI / 2); g.translate(-0.55, 0.22, 0); return g; })(),
 };
 
@@ -251,6 +253,8 @@ class RiderView {
     // maillot à deux couleurs : bande claire pour le rouleur, foncée pour le sprinteur
     const band = lambert(this.sprinter ? fill.clone().multiplyScalar(0.5) : fill.clone().lerp(new THREE.Color("#ffffff"), 0.6));
     const shorts = lambert(SHORTS);
+    this.teamMat = team;
+    this.teamColor = fill.clone();
 
     this.group = new THREE.Group(); // à la place du coureur sur la route, tourné vers l'arrivée
     this.model = new THREE.Group(); // à l'échelle des coureurs
@@ -357,6 +361,16 @@ class RiderView {
                                                                   opacity: 0.7, depthWrite: false }));
     this.dust.frustumCulled = false;
     this.model.add(this.dust);
+    // fatigue : un halo rouge autour du coureur et un anneau rouge qui s'élargit au sol
+    this.halo = new THREE.Mesh(parts.halo, new THREE.MeshBasicMaterial({ color: TIRED, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.halo.position.y = 0.2;
+    this.model.add(this.halo);
+    this.pulse = new THREE.Mesh(parts.ring, new THREE.MeshBasicMaterial({ color: TIRED, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide }));
+    this.pulse.rotation.x = -Math.PI / 2;
+    this.pulse.position.y = LINE_LIFT * 4;
+    this.group.add(this.pulse);
 
     this.crank = rnd(r.name.length + r.team) * Math.PI * 2;
     this.wheel = 0;
@@ -364,7 +378,7 @@ class RiderView {
   }
 
   // une image : place, posture, pédalage ; `draft` : aspiré en ce moment ; `wake` : il protège quelqu'un
-  place(road, p, lane, { current, crashed, draft, wake, t, dt }) {
+  place(road, p, lane, { current, crashed, draft, wake, tired, t, dt }) {
     road.point(p, lane, this.group.position);
     const a = road.point(p - 0.25, lane), b = road.point(p + 0.25, lane);
     this.group.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
@@ -395,6 +409,22 @@ class RiderView {
     this.wake.material.opacity = wake ? 0.16 + 0.08 * Math.sin(t * 8) : 0;
     this.speed.visible = !!draft;
     if (draft) this.speedLines(t);
+    this.tire(!!tired, t);
+  }
+
+  // il va prendre une carte Fatigue : maillot qui vire au rouge, halo et anneau rouges qui pulsent
+  tire(tired, t) {
+    const beat = 0.5 + 0.5 * Math.sin(t * 5);
+    this.teamMat.color.copy(this.teamColor);
+    if (tired) this.teamMat.color.lerp(new THREE.Color(TIRED), 0.55 + 0.3 * beat);
+    this.halo.visible = this.pulse.visible = tired;
+    this.tag.classList.toggle("tired", tired);
+    if (!tired) return;
+    this.halo.material.opacity = 0.12 + 0.14 * beat;
+    this.halo.scale.setScalar(0.95 + 0.12 * beat);
+    const wave = (t * 0.8) % 1; // l'anneau part du coureur et s'efface en s'élargissant
+    this.pulse.scale.setScalar(1 + wave * 1.6);
+    this.pulse.material.opacity = 0.7 * (1 - wave);
   }
 
   // le corps dans la posture du moment
@@ -969,7 +999,7 @@ export function createBoard3D(container, colors) {
         riders.set(r.name, view);
         scene.add(view.group);
       }
-      view.place(road, r.p, r.lane, { current: r.name === current, crashed: r.crashed, draft: r.draft,
+      view.place(road, r.p, r.lane, { current: r.name === current, crashed: r.crashed, draft: r.draft, tired: r.tired,
                                       wake: protectors.has(r.name), t, dt });
       seen.add(r.name);
     }

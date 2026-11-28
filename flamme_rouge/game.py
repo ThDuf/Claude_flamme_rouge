@@ -472,11 +472,15 @@ class Game:
             or any(r.crashed for r in self.riders_at(square))
         )
 
-    def apply_exhaustion(self) -> list[Rider]:
-        """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2).
+    def exhaustion_riders(self) -> list[Rider]:
+        """Les coureurs qui prendront une carte Fatigue : la case devant eux est entièrement vide.
         Les équipes fantômes (Peloton, Muscle) n'en prennent jamais."""
-        exhausted = [r for r in self.riders if not self.riders_at(r.position + 1) and not self.is_ghost(r)
-                     and not (self.tour and r.position >= len(self.track))]  # Grand Tour : pas pour les arrivés
+        return [r for r in self.riders if not self.riders_at(r.position + 1) and not self.is_ghost(r)
+                and not (self.tour and r.position >= len(self.track))]  # Grand Tour : pas pour les arrivés
+
+    def apply_exhaustion(self) -> list[Rider]:
+        """Fatigue : un coureur dont la case devant lui est entièrement vide reçoit une carte Fatigue (2)."""
+        exhausted = self.exhaustion_riders()
         for rider in exhausted:
             rider.recycle.append(exhaustion_card())
         return exhausted

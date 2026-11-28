@@ -53,7 +53,8 @@ qui rejoint avec le code.
   (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
 - Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », une vraie scène 3D
   (Three.js) avec le relief, des coureurs qui pédalent (en danseuse en montée, en roue libre en descente), le rouleur
-  et le sprinteur reconnaissables, l'aspiration et les chutes visibles, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
+  et le sprinteur reconnaissables, l'aspiration et les chutes visibles,
+  les coureurs qui vont prendre une carte Fatigue en rouge avec un halo, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
   molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. La météo y
   est en 3D : nuage, pluie, éclaboussures et route mouillée ; rafales, feuilles emportées et manche à air
   tournée dans le sens du vent. Dans le salon, le même bouton montre en 3D le parcours choisi. Three.js est servi par le site

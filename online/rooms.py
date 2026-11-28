@@ -516,6 +516,8 @@ class Room:
                 self._cache.clear()
             if view is None:
                 view = follow_view(g, camera, proj=proj) if camera in (FOLLOW_PELOTON, FOLLOW_HEAD) else None
+            # phase de fatigue : les coureurs qui vont prendre une carte Fatigue (la vue 3D les montre)
+            tired = {r.name for r in g.exhaustion_riders()} if ctl.phase == EXHAUSTION else set()
             shared = {
                 "view": list(view or map_transform(g, proj=proj)),  # le cadrage utilisé : point de départ des zooms
                 "iso_angle": angle,
@@ -527,7 +529,7 @@ class Room:
                 "geo": road_geometry(g, view, proj=proj),
                 "profile_geo": profile_geometry(g.track, BOARD_W, PROFILE_H),
                 "riders": [{"name": r.name, "team": r.team, "position": r.position, "lane": r.lane,
-                            "crashed": r.crashed} for r in g.riders],
+                            "crashed": r.crashed, "tired": r.name in tired} for r in g.riders],
                 "anim": self.last_anim,
                 "weather": [{"start": z.start, "end": z.end, "effect": z.effect} for z in g.weather.zones]
                 if g.weather else [],

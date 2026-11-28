@@ -807,7 +807,7 @@ function riderList(race, positions, drafting = false) {
   return race.riders.map((r) => {
     const at = positions[r.name];
     return { name: r.name, team: r.team, crashed: !!r.crashed && !at, p: at ? at[0] : r.position,
-             lane: at ? at[1] : r.lane, draft: drafting && !!at };
+             lane: at ? at[1] : r.lane, draft: drafting && !!at, tired: !!r.tired && !at };
   });
 }
 

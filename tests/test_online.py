@@ -405,3 +405,29 @@ def test_local_launcher_server_takes_a_free_port():
         assert host == "127.0.0.1" and port > 0
     finally:
         httpd.server_close()
+
+
+def test_riders_about_to_take_a_fatigue_card_are_marked():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+
+    def race():
+        return api.handle("GET", "/api/state", {"code": code, "token": token}, {})["race"]
+
+    hands = race()["hands"]
+    api.handle("POST", "/api/cards", {}, {"code": code, "token": token, "choices": {h["name"]: 0 for h in hands}})
+    for _ in range(4):
+        state = race()
+        if state["phase"] == "exhaustion":
+            break
+        assert not any(r["tired"] for r in state["riders"])  # pas encore la phase de fatigue
+        api.handle("POST", "/api/advance", {}, {"code": code, "token": token, "phase": state["phase"]})
+    state = race()
+    assert state["phase"] == "exhaustion"
+    occupied = {r["position"] for r in state["riders"]}
+    tired = {r["name"] for r in state["riders"] if r["tired"]}
+    assert tired and tired == {r["name"] for r in state["riders"] if r["position"] + 1 not in occupied}
+    api.handle("POST", "/api/advance", {}, {"code": code, "token": token, "phase": "exhaustion"})
+    assert not any(r["tired"] for r in race()["riders"])  # la fatigue est prise : plus de marque
