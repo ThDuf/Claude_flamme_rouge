@@ -52,7 +52,7 @@ qui rejoint avec le code.
   sans bouton de jeu, à mettre sur une télé, un vidéoprojecteur ou en partage d'écran. Son adresse
   (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
 - Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », une vraie scène 3D
-  (Three.js) avec le relief, des coureurs qui pédalent (en danseuse en montée, en roue libre en descente), le rouleur
+  (Three.js) avec le relief (la route posée sur des collines qui la suivent), des coureurs qui pédalent (en danseuse en montée, en roue libre en descente), le rouleur
   et le sprinteur reconnaissables, l'aspiration et les chutes visibles,
   au clic sur « Fatigue », ceux qui prennent une carte Fatigue en rouge avec un halo, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
   molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. La météo y

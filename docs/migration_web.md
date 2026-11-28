@@ -126,8 +126,9 @@ route seulement s'il ne l'a pas.
 - Quand la 3D est au point, supprimer `iso.py` et le code `proj` de `boardview.py`.
 - Garder les visuels **faits maison** : pas d'images officielles de la boîte (voir `portage_bga.md`).
 
-Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage, qui s'arrondit aux changements de pente (interpolation cubique monotone de l'altitude : ni bosse ni creux inventés), (côtés jusqu'au sol,
-sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
+Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage, qui s'arrondit aux changements de pente (interpolation cubique monotone de l'altitude : ni bosse ni creux inventés), posée sur un terrain en collines qui la suit (class Terrain : altitudes de la route alentour pondérées par
+la distance et légères ondulations, borné pour ne jamais recouvrir une route ni la laisser en l'air), avec une
+bordure fine sous la chaussée (plus profonde, en terre, là où une route passe au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
 rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à
 l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent des tempes et de la nuque, glissent le long du cou et tombent, écrasés sur le guidon en roue libre dans les descentes, pédales à plat, même à l'arrêt (recherche de vitesse) ; le rouleur droit, le sprinteur bas et
