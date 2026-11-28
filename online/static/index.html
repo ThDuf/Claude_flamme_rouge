@@ -87,7 +87,11 @@
         </div>
         <p id="guest-settings" class="muted"></p>
         <p class="muted small host-only-link"><a href="/editeur" target="_blank" rel="noopener">✎ Créer ou modifier un parcours</a></p>
-        <canvas id="preview" width="700" height="300"></canvas>
+        <div class="row gap preview-tools">
+          <div class="segmented"><button id="preview-iso" title="Le parcours en 3D ; clic gauche = déplacer, clic molette = tourner, molette = zoom">Vue 3D</button></div>
+        </div>
+        <div class="layer preview-layer"><canvas id="preview" width="700" height="300"></canvas>
+          <div id="preview3d" class="board3d hidden"></div></div>
         <canvas id="preview-profile" width="700" height="110"></canvas>
         <div class="row space">
           <span class="muted" id="lobby-details"></span>

@@ -442,9 +442,9 @@ class Room:
     # ------------------------------------------------------------------ état envoyé au navigateur
 
     def state(self, player: Player, camera: str = "", view: Optional[tuple] = None, iso=None,
-              scene: Optional[int] = None) -> dict:
-        """`scene` : numéro de la scène 3D que le navigateur a déjà (0 s'il n'en a pas, None sans vue 3D) ;
-        la route de la course part avec l'état seulement s'il ne l'a pas."""
+              scene: Optional[str] = None) -> dict:
+        """`scene` : la scène 3D que le navigateur a déjà (son `scene_id`, "-" s'il n'en a pas, None sans vue 3D) ;
+        la route du parcours choisi (salon) ou de la course part avec l'état seulement s'il ne l'a pas."""
         self.touched = time.monotonic()
         base = {
             "version": self.version,
@@ -455,11 +455,15 @@ class Room:
         }
         if self.game is None:
             base["lobby"] = self._lobby_state()
+            if scene is not None and scene != base["lobby"]["scene_id"]:
+                if "scene" not in self._cache:
+                    self._cache["scene"] = build_scene(self.choice().track)
+                base["lobby"]["scene"] = self._cache["scene"]
         elif self.stage_result is not None:
             base["tour_results"] = self._tour_results_state()
         else:
             base["race"] = self._race_state(player, camera, view, iso)
-            if scene is not None and scene != self.scene_id:
+            if scene is not None and scene != base["race"]["scene_id"]:
                 if self._scene is None:
                     self._scene = build_scene(self.game.track)
                 base["race"]["scene"] = self._scene
@@ -493,6 +497,7 @@ class Room:
             "rest_after": self.rest_after,
             "min_stages": MIN_TOUR_STAGES,
             "max_stages": MAX_TOUR_STAGES,
+            "scene_id": f"salon:{choice.key}",  # l'aperçu 3D du parcours choisi
         }
 
     def _race_state(self, player: Player, camera: str, view: Optional[tuple] = None, iso=None) -> dict:
@@ -599,7 +604,7 @@ class Room:
             "winner": self._winner_text(),
             "size": [BOARD_W, MAP_H, PROFILE_H],
             "tour": self._tour_race_info(),
-            "scene_id": self.scene_id,
+            "scene_id": f"course:{self.scene_id}",
             **shared,
         }
 

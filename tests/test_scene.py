@@ -5,16 +5,29 @@ from flamme_rouge.boardview import road_altitudes
 from flamme_rouge.geometry import EXTRA_SQUARES, layout_squares
 from flamme_rouge.iso import projection
 from flamme_rouge.official import official_stages
-from flamme_rouge.scene import build_scene
+from flamme_rouge.scene import _too_close, build_scene
 from flamme_rouge.tiles import plan_to_track
 from flamme_rouge.track import Track
+
+
+def test_roads_never_overlap():
+    # La Haut Montagne : après l'arrivée, la route repartirait au-dessus de l'épingle des cases 32 à 35
+    for stage in official_stages():
+        track = plan_to_track(stage.tiles)
+        rows = build_scene(track)["squares"]
+        squares = layout_squares(track)[:len(rows)]
+        assert len(rows) > len(track)  # la case du damier est toujours là
+        for j in range(len(squares)):
+            assert not any(_too_close(squares[j], squares[i]) for i in range(j - 3)), (stage.name, j)
+    cut = build_scene(plan_to_track(official_stages()[2].tiles))
+    assert len(cut["squares"]) < cut["n"] + EXTRA_SQUARES and len(cut["z"]) == len(cut["squares"]) + 1
 
 
 def test_corners_match_the_squares_of_the_map():
     track = plan_to_track(official_stages()[0].tiles)
     scene = build_scene(track)
     squares = layout_squares(track)
-    assert len(scene["squares"]) == len(squares) == len(track) + EXTRA_SQUARES
+    assert len(scene["squares"]) <= len(squares) == len(track) + EXTRA_SQUARES
     for row, sq in zip(scene["squares"], squares):
         assert row["left"][0] == pytest.approx(sq.lb, abs=1e-3) and row["left"][-1] == pytest.approx(sq.lf, abs=1e-3)
         assert row["right"][0] == pytest.approx(sq.rb, abs=1e-3) and row["right"][-1] == pytest.approx(sq.rf, abs=1e-3)

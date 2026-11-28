@@ -13,7 +13,8 @@ const session = { code: null, token: null, version: 0, camera: "", showPodium: t
                   anim: null, playedAnim: null, animate: true,
                   view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
                   iso: false, // vue 3D (option, board3d.js) : la route arrive une fois par course (scene)
-                  scene: null, board3d: null, // {id, data} reçue du serveur ; la vue Three.js une fois chargée
+                  scene: null, // {id, data} : la route 3D reçue du serveur (parcours du salon ou course)
+                  board3d: null, previewBoard: null, // les vues Three.js de la course et du salon, une fois chargées
                   replay: { t: 0, playing: false, last: 0 }, // revoir la course : position dans l'historique
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
@@ -127,7 +128,7 @@ async function poll() {
     const params = { code: session.code, since: session.version, camera: session.camera };
     if (session.watch) params.watch = 1; else params.token = session.token;
     if (session.view) params.view = session.view.map((v) => v.toFixed(2)).join(",");
-    if (session.iso) params.scene = String(session.scene ? session.scene.id : 0); // la route, si on ne l'a pas
+    if (session.iso) params.scene = session.scene ? session.scene.id : "-"; // la route 3D, si on ne l'a pas
     const state = await get("/api/state", params);
     if (seq !== pollSeq) return; // une demande plus récente est partie : elle reprendra la boucle
     if (!state.same) {
@@ -164,6 +165,7 @@ function render(state, previousVersion, hadRace) {
   if (state.lobby) {
     session.anim = null;
     session.view = null; // le prochain parcours repart en vue complète
+    if (state.lobby.scene) session.scene = { id: state.lobby.scene_id, data: state.lobby.scene };
     show("lobby");
     renderLobby(state);
   } else if (state.tour_results) {
@@ -250,6 +252,7 @@ function renderLobby(state) {
   const [w, h, ph] = lobby.preview_size;
   paint($("preview"), lobby.preview.map, w, h);
   paint($("preview-profile"), lobby.preview.profile, w, ph);
+  $("preview3d").classList.toggle("hidden", !showPreview3d());
   $("lobby-details").textContent = `${lobby.parcours_label} · ${lobby.details}`;
   $("start").classList.toggle("hidden", !host);
   renderTourSettings(lobby, host);
@@ -811,8 +814,11 @@ let loading3d = null;
 function load3d() { // Three.js (vendor/) : chargé seulement quand on choisit la vue 3D
   if (!loading3d) {
     loading3d = import("./board3d.js").then((m) => {
-      session.board3d = m.createBoard3D($("map3d"), { ...session.info.colors, fill: TEAM_FILL, label: LABEL_ON_FILL });
+      const colors = { ...session.info.colors, fill: TEAM_FILL, label: LABEL_ON_FILL };
+      session.board3d = m.createBoard3D($("map3d"), colors);
+      session.previewBoard = m.createBoard3D($("preview3d"), colors);
       drawBoard();
+      if (session.state && session.state.lobby) renderLobby(session.state);
     }).catch((e) => {
       console.error(e);
       loading3d = null;
@@ -826,8 +832,18 @@ function load3d() { // Three.js (vendor/) : chargé seulement quand on choisit l
 }
 
 function paintIsoButton() {
-  $("iso").classList.toggle("on", session.iso);
-  $("iso").textContent = (session.iso ? "✓ " : "") + "Vue 3D";
+  for (const id of ["iso", "preview-iso"]) {
+    $(id).classList.toggle("on", session.iso);
+    $(id).textContent = (session.iso ? "✓ " : "") + "Vue 3D";
+  }
+}
+
+// l'aperçu 3D du parcours choisi, dans le salon
+function showPreview3d() {
+  const lobby = session.state && session.state.lobby;
+  if (!session.iso || !session.previewBoard || !lobby || !session.scene || session.scene.id !== lobby.scene_id) return false;
+  if (session.previewBoard.sceneId !== session.scene.id) session.previewBoard.setScene(session.scene.data, session.scene.id);
+  return true;
 }
 
 // Le plateau : la carte complète, ou, pendant un déplacement, la route seule avec les coureurs qui roulent par-dessus.
@@ -943,10 +959,14 @@ function frame(now) {
   if (now - lastFrame < 33) return; // ~30 images par seconde
   lastFrame = now;
   const state = session.state;
+  const t = now / 1000;
+  if (state && state.lobby && !$("lobby").classList.contains("hidden") && showPreview3d()) { // aperçu 3D du salon
+    session.previewBoard.draw({ list: [], rest: [], follow: "", zones: [], t, animate: session.animate });
+    return;
+  }
   if (!state || !state.race || $("race").classList.contains("hidden") || session.previewing) return;
   const race = state.race;
   const [w, h, ph] = race.size;
-  const t = now / 1000;
   let mapShapes = [];
   if (session.anim) {
     const a = session.anim;
@@ -1234,17 +1254,18 @@ async function start() {
   // vue 3D : une option (la 2D par défaut), réglage propre à ce navigateur ; ⟲ ⟳ tournent la caméra
   session.iso = load("fr-iso") === "1";
   paintIsoButton();
-  if (session.iso) load3d();
   const setIso = (on) => {
     session.iso = on;
     store("fr-iso", on ? "1" : "0");
     paintIsoButton();
     if (on) load3d();
     drawBoard();
+    if (session.state && session.state.lobby) renderLobby(session.state);
     session.version = 0; // on redemande l'état : la route 3D part avec lui
     poll();
   };
   $("iso").addEventListener("click", () => setIso(!session.iso));
+  $("preview-iso").addEventListener("click", () => setIso(!session.iso));
   const rotate = (step) => () => {
     if (!session.iso) { setIso(true); return; }
     if (session.board3d) session.board3d.rotate(step);
@@ -1288,6 +1309,7 @@ async function start() {
     return;
   }
   buildSettings();
+  if (session.iso) load3d(); // après /api/info : la vue 3D prend ses couleurs
   const params = new URLSearchParams(location.search);
   const code = params.get("code");
   if (code && params.get("watch")) { startWatching(code.toUpperCase()); return; }

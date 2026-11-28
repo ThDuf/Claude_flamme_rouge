@@ -53,7 +53,9 @@ qui rejoint avec le code.
   (`…?code=CODE&watch=1`) s'ouvre sur n'importe quel appareil, sans prendre de place dans le salon.
 - Vue 3D (option, la 2D par défaut ; réglage de chaque navigateur) : bouton « Vue 3D », une vraie scène 3D
   (Three.js) avec le relief, les coureurs en volume et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
-  molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. Three.js est servi par le site
+  molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. La météo y
+  est en 3D : nuage, pluie, éclaboussures et route mouillée ; rafales, feuilles emportées et drapeau qui claque
+  dans le sens du vent. Dans le salon, le même bouton montre en 3D le parcours choisi. Three.js est servi par le site
   lui-même (`online/static/vendor/`) : la 3D marche aussi sans internet, en local.
 - Caméra : tout le parcours, zoom peloton ou zoom tête de course (chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin

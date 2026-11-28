@@ -297,8 +297,8 @@ def test_the_3d_scene_is_sent_once_per_race():
         return api.handle("GET", "/api/state", {"code": code, "token": token, **query}, {})["race"]
 
     plain = race()
-    assert "scene" not in plain and plain["scene_id"] >= 1  # sans vue 3D : pas de scène
-    first = race(scene="0")  # vue 3D, rien en main : la route part avec l'état
+    assert "scene" not in plain and plain["scene_id"].startswith("course:")  # sans vue 3D : pas de scène
+    first = race(scene="-")  # vue 3D, rien en main : la route part avec l'état
     scene = first["scene"]
     assert len(scene["squares"]) == len(scene["z"]) - 1 and scene["n"] > 0
     assert any(len(str(p[0]).split(".")[-1]) == 3 for sq in scene["squares"] for p in sq["left"])  # au millième
@@ -307,7 +307,24 @@ def test_the_3d_scene_is_sent_once_per_race():
     api.handle("POST", "/api/lobby", {}, {"code": code, "token": token})
     api.handle("POST", "/api/start", {}, {"code": code, "token": token})
     again = race(scene=str(first["scene_id"]))  # nouvelle course : nouvelle scène
-    assert again["scene_id"] == first["scene_id"] + 1 and "scene" in again
+    assert again["scene_id"] != first["scene_id"] and "scene" in again
+
+
+def test_the_lobby_sends_the_3d_scene_of_the_chosen_track():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+
+    def lobby(**query):
+        return api.handle("GET", "/api/state", {"code": code, "token": token, **query}, {})["lobby"]
+
+    assert "scene" not in lobby()  # sans vue 3D : pas de scène
+    first = lobby(scene="-")
+    assert first["scene"]["squares"] and "scene" not in lobby(scene=first["scene_id"])
+    other = next(p["key"] for p in api.handle("GET", "/api/info", {}, {})["parcours"] if p["key"] != first["parcours"])
+    api.handle("POST", "/api/settings", {}, {"code": code, "token": token, "parcours": other})
+    changed = lobby(scene=first["scene_id"])  # autre parcours : nouvelle scène
+    assert changed["scene_id"] != first["scene_id"] and changed["scene"]["n"] > 0
 
 
 def test_finished_race_sends_its_history_for_the_replay():

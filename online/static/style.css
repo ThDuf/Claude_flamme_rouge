@@ -71,6 +71,8 @@ button.big { padding: 12px 24px; font-size: 17px; }
 .cards .bid-riders button:hover:not(:disabled) { filter: brightness(1.1); border-color: var(--accent); }
 canvas { display: block; width: 100%; height: auto; }
 #preview, #preview-profile { margin-top: 10px; border-radius: 6px; }
+.preview-tools { margin-top: 10px; }
+.preview-layer #preview3d { top: 10px; border-radius: 6px; } /* sous la marge du canvas */
 
 .race-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .badge { background: var(--accent); color: var(--on-accent); font-weight: 700; padding: 3px 10px; border-radius: 4px; }
