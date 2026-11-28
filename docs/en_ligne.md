@@ -56,7 +56,7 @@ qui rejoint avec le code.
   et le sprinteur reconnaissables, l'aspiration et les chutes visibles,
   au clic sur « Fatigue », ceux qui prennent une carte Fatigue en rouge avec un halo, et la météo animée. Clic gauche = déplacer, clic molette (ou droit) = tourner,
   molette ou ＋/－ = zoom, ⟲ ⟳ = tourner de 30° ; les zooms peloton et tête de course suivent le groupe. La météo y
-  est en 3D : nuage, pluie, éclaboussures et route mouillée ; rafales, feuilles emportées et manche à air
+  est en 3D : nuage, pluie, éclaboussures et route mouillée ; filets de vent et manche à air
   tournée dans le sens du vent. Dans le salon, le même bouton montre en 3D le parcours choisi.
 - Sur un grand écran (1500 px et plus) : la main à gauche du plateau, le bouton d'action et le journal à droite. Three.js est servi par le site
   lui-même (`online/static/vendor/`) : la 3D marche aussi sans internet, en local.

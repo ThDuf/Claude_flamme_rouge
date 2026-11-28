@@ -543,22 +543,21 @@ class RiderView {
 // ------------------------------------------------------------------ la météo
 // Pluie : un nuage sombre au-dessus de la zone, des gouttes en traits qui tombent en biais, des éclaboussures
 // qui s'élargissent sur la route et une route mouillée qui brille. Vent : des rafales en rubans ondulants qui
-// filent dans le sens du vent, des feuilles et de la poussière emportées, et une manche à air au bord de la
+// filent dans le sens du vent, et une manche à air au bord de la
 // route, tourné dans le sens du vent (dans le dos, de face ou de travers).
 
-const RAIN_PER_SQUARE = 55; // gouttes par case
-const RAIN_TOP = 2.6; // hauteur d'où tombent les gouttes, en cases
-const RAIN_STREAK = 0.22; // longueur d'une goutte
-const RAIN_SLANT = 0.12; // biais des gouttes (un peu de vent)
-const SPLASH_PER_SQUARE = 14;
+const RAIN_PER_SQUARE = 70; // gouttes par case : plus nombreuses mais plus fines
+const RAIN_TOP = 5; // hauteur des nuages, d'où tombent les gouttes, en cases
+const RAIN_STREAK = 0.14; // longueur d'une goutte
+const RAIN_SLANT = 0.08; // biais des gouttes (un peu de vent)
+const RAIN_OPACITY = 0.45; // des gouttes légères, à peine visibles une à une
+const SPLASH_PER_SQUARE = 10;
 const WET_COLOR = "#1d3b5c";
 const CLOUD_COLOR = "#5d6b80";
 const GUST_PER_SQUARE = 5; // rubans de vent par case
 const GUST_POINTS = 12; // points le long d'un ruban
-const LEAF_PER_SQUARE = 4;
 const SOCK_POLE = 1.5, SOCK_LENGTH = 0.85, SOCK_MOUTH = 0.13, SOCK_TIP = 0.06; // la manche à air, en cases
 const SOCK_STRIPES = 5; // bandes rouges et blanches
-const LEAF_COLORS = ["#c9a227", "#a16207", "#84cc16", "#d6c7a1"];
 
 
 class WeatherView {
@@ -599,7 +598,7 @@ class WeatherView {
       const p = start + ((i + 0.5) / puffs) * length;
       const at = road.point(p, 0.5 + (rnd(i + k) - 0.5) * 1.6);
       const m = new THREE.Mesh(puff, grey);
-      m.position.set(at.x, at.y + RAIN_TOP + 0.25 + rnd(i * 3 + k) * 0.25, at.z);
+      m.position.set(at.x, at.y + RAIN_TOP + 0.3 + rnd(i * 3 + k) * 0.4, at.z);
       m.scale.set(1.2 + rnd(i * 7) * 0.7, 0.5 + rnd(i * 5) * 0.2, 1.1 + rnd(i * 11) * 0.6);
       m.userData.base = m.position.y;
       m.userData.phase = rnd(i * 13) * 6;
@@ -621,12 +620,12 @@ class WeatherView {
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     g.setAttribute("color", new THREE.BufferAttribute(tint, 3));
     const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true,
-                                                                          opacity: 0.8, depthWrite: false }));
+                                                                          opacity: RAIN_OPACITY, depthWrite: false }));
     lines.frustumCulled = false;
     this.group.add(lines);
     // les éclaboussures : des anneaux qui s'élargissent et s'effacent dans la couleur de la route
     const splashes = Math.round(SPLASH_PER_SQUARE * length);
-    const ring = new THREE.RingGeometry(0.03, 0.045, 16);
+    const ring = new THREE.RingGeometry(0.025, 0.033, 16); // des éclaboussures fines
     ring.rotateX(-Math.PI / 2);
     const rings = new THREE.InstancedMesh(ring, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85,
                                                                               depthWrite: false }), splashes);
@@ -698,34 +697,6 @@ class WeatherView {
     };
   }
 
-  // des feuilles et de la poussière emportées, qui tourbillonnent un peu
-  leaves(count, place) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-    const tint = new Float32Array(count * 3), c = new THREE.Color();
-    for (let i = 0; i < count; i++) {
-      c.set(LEAF_COLORS[i % LEAF_COLORS.length]);
-      tint.set([c.r, c.g, c.b], i * 3);
-    }
-    g.setAttribute("color", new THREE.BufferAttribute(tint, 3));
-    const points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.11, vertexColors: true }));
-    points.frustumCulled = false;
-    this.group.add(points);
-    const bits = Array.from({ length: count }, (_, d) => ({
-      phase: rnd(d * 59), speed: 0.18 + rnd(d * 61) * 0.18, lane: rnd(d * 67), wob: rnd(d * 71) * 6 }));
-    const at = new THREE.Vector3();
-    return (t) => {
-      const pos = g.attributes.position;
-      bits.forEach((s, i) => {
-        const life = (t * s.speed + s.phase) % 1;
-        place(s, life, 0.5, t, at);
-        at.y += 0.05 + Math.abs(Math.sin(t * 4 + s.wob)) * 0.35 * Math.sin(Math.PI * life);
-        pos.setXYZ(i, at.x, at.y, at.z);
-      });
-      pos.needsUpdate = true;
-    };
-  }
-
   // une manche à air au bord de la route : un mât, un anneau, et la manche rayée rouge et blanc, gonflée,
   // tournée dans le sens du vent (`dir` : vecteur au sol) ; elle ondule et se balance un peu
   windsock(p, lane, dir) {
@@ -785,15 +756,10 @@ class WeatherView {
       return road.point(Math.min(Math.max(p, start), end), lane, out);
     };
     const gusts = this.gusts(Math.round(GUST_PER_SQUARE * length), color, along);
-    const leafAlong = (s, life, u, t, out) => {
-      const p = dir > 0 ? start + life * length : end - life * length;
-      return road.point(p, -1 + s.lane * (lanes + 2) + Math.sin(t * 2 + s.wob) * 0.3, out);
-    };
-    const leaves = this.leaves(Math.round(LEAF_PER_SQUARE * length), leafAlong);
     const a = road.point(start + 0.5, 0), b = road.point(start + 1.5, 0);
     const tangent = b.sub(a).setY(0).normalize().multiplyScalar(dir);
     const sock = this.windsock(start + 0.5, -1.4, tangent);
-    this.items.push((t) => { gusts(t); leaves(t); sock(t); });
+    this.items.push((t) => { gusts(t); sock(t); });
   }
 
   crosswind(start, end, k, color) {
@@ -806,13 +772,10 @@ class WeatherView {
       return road.point(Math.min(Math.max(p, start), end), lane, out);
     };
     const gusts = this.gusts(Math.round(GUST_PER_SQUARE * length), color, across);
-    const leafAcross = (s, life, u, t, out) => road.point(start + s.lane * length + Math.sin(t * 2 + s.wob) * 0.2,
-                                                          far - life * (far - near), out);
-    const leaves = this.leaves(Math.round(LEAF_PER_SQUARE * length), leafAcross);
     const mid = start + Math.min(0.5, length / 2);
     const left = road.point(mid, lanes), right = road.point(mid, 0);
     const sock = this.windsock(mid, lanes + 0.6, right.sub(left).setY(0).normalize());
-    this.items.push((t) => { gusts(t); leaves(t); sock(t); });
+    this.items.push((t) => { gusts(t); sock(t); });
   }
 
   // ---------------------------------------------------------------- soleil
