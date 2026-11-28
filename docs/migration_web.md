@@ -127,7 +127,8 @@ route seulement s'il ne l'a pas.
 - Garder les visuels **faits maison** : pas d'images officielles de la boîte (voir `portage_bga.md`).
 
 Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage, qui s'arrondit aux changements de pente (interpolation cubique monotone de l'altitude : ni bosse ni creux inventés), posée sur un talus (class Terrain : une levée de terre qui redescend en pente douce de chaque côté jusqu'à une
-plaine plate, sans jamais recouvrir une route plus basse toute proche), avec une
+plaine plate, sans redescendre entre deux routes hautes proches (les creux étroits sont comblés) ni jamais
+recouvrir une route plus basse toute proche ; une texture de pelouse sur tout le sol), avec une
 bordure fine sous la chaussée (plus profonde, en terre, là où une route passe au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
 rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à

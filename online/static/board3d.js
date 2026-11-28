@@ -12,7 +12,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 
 const SKY = 0x16233a;
-const GROUND = "#1f5a3b";
 const ROAD_EDGE = "#e2e8f0", LANE_LINE = "#64748b", SQUARE_LINE = "#2a3444";
 const CURRENT_RING = "#fde047", CRASH_MARK = "#ff4d4f";
 const WHEEL = "#1e293b", FRAME = "#cbd5e1", SKIN = "#f1c27d";
@@ -24,7 +23,9 @@ const TERRAIN_STEP = 0.5; // un point de terrain tous les 0,5 case
 const TERRAIN_MARGIN = 8; // le terrain déborde de 8 cases autour du parcours (au-delà : la plaine)
 const TERRAIN_TALUS = 0.7; // pente du talus : il descend de 0,7 par case en s'éloignant de la route
 const TERRAIN_RISE = 1.9; // et ne monte jamais au-dessus d'une route voisine plus basse (pente maximale vers elle)
-const TERRAIN_GREEN = "#1f5a3b", TERRAIN_HIGH = "#2f6e45"; // herbe, un peu plus claire en haut du talus
+const TERRAIN_FILL = 3; // un creux de moins de 2 × 3 cases entre deux routes hautes est comblé (pas de cuvette)
+const GRASS_TILE = 2; // la texture de pelouse se répète toutes les 2 cases
+const TERRAIN_GREEN = "#2a6e44", TERRAIN_HIGH = "#3a8050"; // herbe (la texture l'assombrit un peu), plus claire en haut du talus
 const CLIFF = "#6b5a48"; // la paroi de terre sous une route plus haute que le terrain
 const SLICES = 6; // tranches d'une case droite : la route s'arrondit aux changements de pente
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
@@ -72,12 +73,13 @@ class Terrain {
     this.nx = Math.ceil((Math.max(...xs) + TERRAIN_MARGIN - this.x0) / TERRAIN_STEP) + 1;
     this.nz = Math.ceil((Math.max(...zs) + TERRAIN_MARGIN - this.z0) / TERRAIN_STEP) + 1;
     this.h = new Float32Array(this.nx * this.nz);
+    const ceiling = new Float32Array(this.nx * this.nz);
     const top = Math.max(...pts.map((q) => q[2]));
     const reach = (top - this.low) / TERRAIN_TALUS + 1; // au-delà, le talus est déjà redescendu à la plaine
     for (let j = 0; j < this.nz; j++) {
       for (let i = 0; i < this.nx; i++) {
         const x = this.x0 + i * TERRAIN_STEP, z = this.z0 + j * TERRAIN_STEP;
-        let mound = this.low, upper = Infinity;
+        let mound = this.low, upper = Infinity; // le talus, et la hauteur à ne pas dépasser
         for (const [px, pz, py, half] of pts) {
           const dx = x - px, dz = z - pz;
           if (dx > reach || dx < -reach || dz > reach || dz < -reach) continue;
@@ -85,9 +87,35 @@ class Terrain {
           mound = Math.max(mound, py - TERRAIN_DROP - TERRAIN_TALUS * d); // le talus de cette route
           upper = Math.min(upper, py - TERRAIN_DROP + TERRAIN_RISE * d); // jamais sur une route plus basse
         }
-        this.h[j * this.nx + i] = Math.min(mound, upper);
+        this.h[j * this.nx + i] = mound;
+        ceiling[j * this.nx + i] = upper;
       }
     }
+    // entre deux routes hautes, le talus ne redescend pas : les creux étroits sont comblés jusqu'au plus bas de leurs
+    // deux bords (une fermeture : chaque point prend le plus haut alentour, puis le plus bas de ces hauteurs)
+    const r = Math.round(TERRAIN_FILL / TERRAIN_STEP);
+    this.h = this.spread(this.spread(this.h, r, Math.max), r, Math.min);
+    for (let k = 0; k < this.h.length; k++) this.h[k] = Math.min(this.h[k], ceiling[k]); // jamais sur une route
+  }
+
+  // le plus haut (ou le plus bas, selon `pick`) des points de la grille à moins de r cases, ligne puis colonne
+  spread(src, r, pick) {
+    const { nx, nz } = this, tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        let v = src[j * nx + i];
+        for (let k = Math.max(0, i - r); k <= Math.min(nx - 1, i + r); k++) v = pick(v, src[j * nx + k]);
+        tmp[j * nx + i] = v;
+      }
+    }
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        let v = tmp[j * nx + i];
+        for (let k = Math.max(0, j - r); k <= Math.min(nz - 1, j + r); k++) v = pick(v, tmp[k * nx + i]);
+        out[j * nx + i] = v;
+      }
+    }
+    return out;
   }
 
   // la hauteur du terrain en (x, z), entre les points de la grille
@@ -114,10 +142,50 @@ class Terrain {
     }
     g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const map = grassTexture().clone();
+    map.repeat.set(((this.nx - 1) * TERRAIN_STEP) / GRASS_TILE, ((this.nz - 1) * TERRAIN_STEP) / GRASS_TILE);
+    map.needsUpdate = true;
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, map }));
     m.receiveShadow = true;
     return m;
   }
+}
+
+// une pelouse : des brins d'herbe clairs et foncés sur un fond presque blanc (la couleur vient du terrain, que la
+// texture module), tirés au hasard une fois pour toutes ; elle se répète sans raccord visible
+let grass = null;
+function grassTexture() {
+  if (grass) return grass;
+  const size = 256, c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "rgb(214, 226, 206)";
+  ctx.fillRect(0, 0, size, size);
+  for (let k = 0; k < 90; k++) { // des touffes plus sombres ou plus claires
+    const x = rnd(k * 3.1) * size, y = rnd(k * 5.7) * size, r = 8 + rnd(k * 2.3) * 22, l = 170 + rnd(k * 9.1) * 80;
+    ctx.fillStyle = `rgba(${l - 20}, ${l}, ${l - 30}, 0.35)`;
+    for (const [dx, dy] of [[0, 0], [size, 0], [-size, 0], [0, size], [0, -size]]) { // raccord sur les bords
+      ctx.beginPath();
+      ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.lineCap = "round";
+  for (let k = 0; k < 5000; k++) { // les brins
+    const x = rnd(k * 1.37 + 11) * size, y = rnd(k * 2.71 + 7) * size, len = 2 + rnd(k * 0.53) * 4;
+    const a = -Math.PI / 2 + (rnd(k * 4.13) - 0.5) * 0.9, l = 150 + rnd(k * 6.67) * 105;
+    ctx.strokeStyle = `rgb(${l - 25}, ${l}, ${l - 40})`;
+    ctx.lineWidth = 0.8 + rnd(k * 8.9) * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+    ctx.stroke();
+  }
+  grass = new THREE.CanvasTexture(c);
+  grass.wrapS = grass.wrapT = THREE.RepeatWrapping;
+  grass.colorSpace = THREE.SRGBColorSpace;
+  grass.anisotropy = 8;
+  return grass;
 }
 
 // ------------------------------------------------------------------ la route
@@ -1010,8 +1078,11 @@ export function createBoard3D(container, colors) {
     addTag("ARRIVÉE", data.n, 1, "finish3d", 0.7);
     addTag("DÉPART", data.start, 1, "finish3d", 0.7);
     const box = road.bounds(), size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
-    ground = new THREE.Mesh(new THREE.PlaneGeometry(size.x + 120, size.z + 120), // la plaine, au-delà des collines
-                            new THREE.MeshLambertMaterial({ color: GROUND }));
+    const plain = grassTexture().clone(); // la plaine, au-delà du talus : la même pelouse
+    plain.repeat.set((size.x + 120) / GRASS_TILE, (size.z + 120) / GRASS_TILE);
+    plain.needsUpdate = true;
+    ground = new THREE.Mesh(new THREE.PlaneGeometry(size.x + 120, size.z + 120),
+                            new THREE.MeshLambertMaterial({ color: TERRAIN_GREEN, map: plain }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(center.x, road.terrain.low - 0.01, center.z);
     ground.receiveShadow = true;
