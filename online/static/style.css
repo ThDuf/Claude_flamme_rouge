@@ -219,3 +219,27 @@ a.room-chip { color: var(--text); text-decoration: none; }
                         border-radius: 2px; }
 .num3d { font: 9px/1 system-ui, sans-serif; color: #cbd5e1; text-shadow: 0 1px 2px #000; }
 .finish3d { font: 800 11px/1 system-ui, sans-serif; color: #fff; letter-spacing: .08em; text-shadow: 0 1px 3px #000; }
+
+/* grand écran : la main à gauche du plateau, le bouton d'action et le journal à droite (l'espace sur les côtés
+   servait à rien) ; le plateau peut alors prendre toute la hauteur. Écran partagé (body.tv) : pas de main, inchangé. */
+@media (min-width: 1500px) {
+  body:not(.tv) #race.screen {
+    max-width: none; display: grid; column-gap: 18px; align-items: start;
+    padding-right: 52px; /* l'onglet « Deck », collé au bord droit, ne cache pas le journal */
+    grid-template-columns: minmax(330px, 360px) minmax(0, 1fr) minmax(300px, 380px);
+    grid-template-rows: auto auto auto auto auto auto 1fr;
+    grid-template-areas: "head head head" "tour tour tour" "hand board right" "hand tools right" "hand replay right"
+                         "hand revealed right" "hand error right";
+  }
+  body:not(.tv) #race > .race-head { grid-area: head; }
+  body:not(.tv) #race > #tour-info { grid-area: tour; }
+  body:not(.tv) #race > .board { grid-area: board; width: 100%; max-width: calc((100vh - 200px) * 1000 / 530); }
+  body:not(.tv) #race > .tools { grid-area: tools; }
+  body:not(.tv) #race > #replay { grid-area: replay; }
+  body:not(.tv) #race > #revealed { grid-area: revealed; }
+  body:not(.tv) #race > #race-error { grid-area: error; }
+  body:not(.tv) #race > .race-bottom { display: contents; }
+  body:not(.tv) #race .hand { grid-area: hand; margin: 0; }
+  body:not(.tv) #race .race-right { grid-area: right; }
+  body:not(.tv) #race .log { height: calc(100vh - 190px); min-height: 220px; }
+}
