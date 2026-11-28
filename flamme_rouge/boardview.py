@@ -550,7 +550,8 @@ def profile_geometry(track: Track, width: int, height: int) -> dict:
     à chaque case entière (entre deux cases, c'est une ligne droite) et haut de la zone des effets."""
     n = len(track)
     _heights, _base, x_of, _y_of, y_at = _profile_frame(track, width, height)
-    return {"x0": x_of(0), "sx": x_of(1) - x_of(0), "ys": [y_at(s) for s in range(n + 1)], "n": n,
+    # x1 (la ligne d'arrivée) permet de retrouver la largeur exacte d'une case même si les nombres sont arrondis
+    return {"x0": x_of(0), "x1": x_of(n), "sx": x_of(1) - x_of(0), "ys": [y_at(s) for s in range(n + 1)], "n": n,
             "top": PROFILE_PAD_TOP - 6}
 
 

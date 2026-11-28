@@ -26,6 +26,7 @@ const session = { code: null, token: null, version: 0, camera: "", showPodium: t
                   anim: null, playedAnim: null, animate: true,
                   view: null, // cadrage libre [échelle, x, y] (molette, ＋/－, glisser) ; null = caméra
                   iso: false, isoAngle: null, // vue 3D (option) ; angle null = choisi par le serveur
+                  replay: { t: 0, playing: false, last: 0 }, // revoir la course : position dans l'historique
                   previewing: false, // un zoom est affiché en attendant le dessin net du serveur
                   picks: {}, picksKey: "", // cartes choisies (pas encore validées) pour chacun de mes coureurs
                   watch: false }; // écran partagé : la course sans aucune information d'un joueur
@@ -517,7 +518,8 @@ function mapWeatherShapes(race, t) { // comme boardview.map_weather_fx_primitive
 
 function profileWeatherShapes(race, t) { // comme boardview.weather_fx_primitives
   const c = session.info.colors, fx = c.effects;
-  const { x0: px0, sx, ys, n, top } = race.profile_geo;
+  const { x0: px0, x1: px1, ys, n, top } = race.profile_geo;
+  const sx = px1 != null && n ? (px1 - px0) / n : race.profile_geo.sx; // largeur exacte malgré les arrondis
   const xOf = (i) => px0 + i * sx;
   const yAt = (s) => {
     const i = Math.max(0, Math.min(n, Math.floor(s))), j = Math.min(n, i + 1), f = Math.max(0, Math.min(1, s - i));
@@ -658,9 +660,94 @@ function drawBoard() {
   const race = state.race;
   const [w, h, ph] = race.size;
   const podium = race.finished && race.podium && session.showPodium;
-  if (session.anim) paint($("map"), session.anim.race.map_base, w, h);
+  if (session.anim || replayActive(race)) paint($("map"), (session.anim ? session.anim.race : race).map_base, w, h);
   else paint($("map"), podium ? race.podium : race.map, w, h);
-  paint($("profile"), race.profile, w, ph);
+  // relecture : le profil sans coureurs ; leurs pastilles suivent la relecture sur le calque du profil
+  paint($("profile"), replayActive(race) && race.profile_base ? race.profile_base : race.profile, w, ph);
+}
+
+// ------------------------------------------------------------------ revoir la course (à l'arrivée)
+// Le serveur envoie l'historique des positions (départ, chaque mouvement, chaque aspiration) ; on le rejoue sur
+// la route sans coureurs, en glissant d'une étape à l'autre, avec une barre de progression.
+
+const REPLAY_STEP_S = 0.8; // durée d'une étape pendant la lecture
+
+function replayActive(race) {
+  return !!(race && race.finished && !session.showPodium && race.history && race.history.length > 1);
+}
+
+function replayPositions(race) {
+  const history = race.history, last = history.length - 1;
+  const t = Math.min(Math.max(session.replay.t, 0), last);
+  const i = Math.min(Math.floor(t), Math.max(last - 1, 0)), f = ease(t - i);
+  const a = history[i].pos, b = history[Math.min(i + 1, last)].pos, out = {};
+  for (const name of Object.keys(a)) {
+    if (!b[name]) continue;
+    out[name] = [a[name][0] + (b[name][0] - a[name][0]) * f, a[name][1] + (b[name][1] - a[name][1]) * f];
+  }
+  return out;
+}
+
+function profileRiderShapes(race, positions) { // comme les coureurs de boardview.profile_primitives
+  const c = session.info.colors;
+  const { x0, x1, ys, n } = race.profile_geo;
+  const sx = x1 != null && n ? (x1 - x0) / n : race.profile_geo.sx; // largeur exacte malgré les arrondis
+  const xOf = (i) => x0 + i * sx;
+  const yAt = (s) => {
+    const i = Math.max(0, Math.min(n, Math.floor(s))), j = Math.min(n, i + 1), f = Math.max(0, Math.min(1, s - i));
+    return ys[i] + (ys[j] - ys[i]) * f;
+  };
+  const riders = race.riders.filter((r) => positions[r.name])
+    .map((r) => ({ name: r.name, team: r.team, p: positions[r.name][0], lane: positions[r.name][1] }));
+  const shapes = [];
+  // groupes (comme race_groups / group_labels) : la tête, le peloton (le plus gros), la lanterne rouge
+  const sorted = riders.slice().sort((a, b) => b.p - a.p || a.lane - b.lane);
+  const groups = [];
+  for (const r of sorted) {
+    const last = groups.length ? groups[groups.length - 1] : null;
+    if (last && Math.round(last[last.length - 1].p) - Math.round(r.p) <= 1) last.push(r); else groups.push([r]);
+  }
+  const labels = [];
+  if (groups.length === 1) labels.push(["PELOTON", groups[0]]);
+  else if (groups.length > 1) {
+    let peloton = groups.reduce((best, g) => (g.length > best.length ? g : best), groups[0]);
+    if (peloton.length < 2) peloton = null;
+    labels.push([peloton === groups[0] ? "TÊTE · PELOTON" : "TÊTE", groups[0]]);
+    if (peloton && peloton !== groups[0]) labels.push(["PELOTON", peloton]);
+    const lastGroup = groups[groups.length - 1];
+    labels.push(["LANTERNE ROUGE", [lastGroup[lastGroup.length - 1]]]);
+  }
+  const boxes = [];
+  for (const [name, members] of labels) {
+    const front = members[0].p, back = members[members.length - 1].p;
+    const gx0 = xOf(back), gx1 = xOf(Math.min(front + 1, n)), color = c.groups[name];
+    const text = name === "LANTERNE ROUGE" ? `${name} · ${members[0].name}` : `${name} (${members.length})`;
+    const half = text.length * 2.6 + 4;
+    const mid = Math.min(Math.max((gx0 + gx1) / 2, half + 2), race.size[0] - half - 2);
+    let y = Infinity;
+    for (let p = Math.floor(Math.min(back, n)); p <= Math.min(front, n); p++) y = Math.min(y, yAt(Math.min(p + 0.5, n)));
+    y -= 26;
+    while (boxes.some(([bx0, bx1, by]) => Math.abs(y + 3 - by) < 14 && mid - half < bx1 && bx0 < mid + half)) y -= 11;
+    y = Math.max(y, 6);
+    boxes.push([mid - half, mid + half, y]);
+    shapes.push(["line", gx0, y + 6, gx1, y + 6, color, 2]);
+    shapes.push(["text", mid, y, text, color, 7, true, "center"]);
+  }
+  for (const r of riders) {
+    const x = xOf(Math.min(r.p + 0.5, n)), y = yAt(Math.min(r.p + 0.5, n)) - 5 - 7 * r.lane;
+    shapes.push(["oval", x - 4, y - 4, x + 4, y + 4, TEAM_FILL[r.team], "#ffffff", 1]);
+  }
+  return shapes;
+}
+
+function syncReplayBar(race) {
+  const history = race.history, last = history.length - 1;
+  const range = $("replay-range");
+  range.max = String(last);
+  if (document.activeElement !== range || session.replay.playing) range.value = String(session.replay.t);
+  const step = Math.min(Math.round(session.replay.t), last);
+  $("replay-label").textContent = `${history[step].label}   (${step + 1}/${history.length})`;
+  $("replay-play").textContent = session.replay.playing ? "⏸" : "▶";
 }
 
 function maybeStartAnimation(race, previousVersion, hadRace) {
@@ -693,11 +780,25 @@ function frame(now) {
       mapShapes = riderShapes(a.race, a.anim.positions(elapsed));
     }
   }
+  let profileShapes = [];
+  if (!session.anim && replayActive(race)) { // revoir la course : avance la lecture et place les coureurs
+    const r = session.replay;
+    if (r.playing) {
+      r.t += (now - r.last) / 1000 / REPLAY_STEP_S;
+      if (r.t >= race.history.length - 1) { r.t = race.history.length - 1; r.playing = false; }
+    }
+    r.last = now;
+    const positions = replayPositions(race);
+    mapShapes = riderShapes(race, positions);
+    if (race.profile_base) profileShapes = profileRiderShapes(race, positions); // le profil suit aussi la relecture
+    syncReplayBar(race);
+  }
   const podium = race.finished && race.podium && session.showPodium && !session.anim;
   const weather = session.animate && race.weather.length;
   if (weather && !podium) mapShapes = mapShapes.concat(mapWeatherShapes(session.anim ? session.anim.race : race, t));
   paint($("map-fx"), mapShapes, w, h);
-  paint($("profile-fx"), weather ? profileWeatherShapes(race, t) : [], w, ph);
+  if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
+  paint($("profile-fx"), profileShapes, w, ph);
 }
 
 // ------------------------------------------------------------------ course
@@ -712,7 +813,9 @@ function renderRace(state, previousVersion, hadRace) {
   if (previousVersion !== undefined) maybeStartAnimation(race, previousVersion, hadRace);
   drawBoard();
   $("toggle-podium").classList.toggle("hidden", !race.finished);
-  $("toggle-podium").textContent = session.showPodium ? "Revoir la course" : "Voir le podium";
+  $("toggle-podium").textContent = session.showPodium ? "⟲ Revoir la course" : "🏆 Voir le podium";
+  $("replay").classList.toggle("hidden", !replayActive(race));
+  if (replayActive(race)) syncReplayBar(race);
   $("back-lobby").classList.toggle("hidden", !(race.finished && state.me.host));
   for (const b of $("camera").querySelectorAll("button")) {
     b.classList.toggle("on", !session.view && b.dataset.camera === session.camera);
@@ -907,7 +1010,20 @@ async function start() {
   });
   $("toggle-podium").addEventListener("click", () => {
     session.showPodium = !session.showPodium;
+    if (!session.showPodium) session.replay = { t: 0, playing: true, last: performance.now() }; // depuis le départ
     if (session.state) renderRace(session.state);
+  });
+  $("replay-play").addEventListener("click", () => {
+    const r = session.replay, race = session.state && session.state.race;
+    if (!race || !race.history) return;
+    if (!r.playing && r.t >= race.history.length - 1) r.t = 0; // à la fin : on recommence
+    r.playing = !r.playing;
+    r.last = performance.now();
+    syncReplayBar(race);
+  });
+  $("replay-range").addEventListener("input", (ev) => { // la barre déplacée : on se place là, la lecture s'arrête
+    session.replay.t = Number(ev.target.value);
+    session.replay.playing = false;
   });
   // vue 3D : une option (la 2D par défaut), réglage propre à ce navigateur ; ⟲ ⟳ tournent le plateau
   session.iso = load("fr-iso") === "1";

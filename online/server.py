@@ -24,7 +24,7 @@ from online.rooms import SEAT_KINDS, TEAM_COLORS, Lobby, OnlineError, Player, pa
 from flamme_rouge.extensions import EXTENSIONS  # noqa: E402
 from flamme_rouge import palette as pal  # noqa: E402
 from flamme_rouge.boardview import (  # noqa: E402
-    CYCLIST_FRAME, CYCLIST_HEIGHT, CYCLIST_SKIN, CYCLIST_WHEEL, FX_RAIN, FX_SUN, FX_WIND,
+    CYCLIST_FRAME, CYCLIST_HEIGHT, CYCLIST_SKIN, CYCLIST_WHEEL, FX_RAIN, FX_SUN, FX_WIND, GROUP_COLORS,
 )
 from flamme_rouge.weather import CROSSWIND, HEADWIND, RAIN, SUNNY, TAILWIND  # noqa: E402
 
@@ -32,7 +32,7 @@ from flamme_rouge.weather import CROSSWIND, HEADWIND, RAIN, SUNNY, TAILWIND  # n
 FX_COLORS = {
     "rain": FX_RAIN, "sun": FX_SUN, "wind": {k: v for k, v in FX_WIND.items()},
     "grass": pal.GRASS, "road": pal.TERRAIN_FILL["."], "card": pal.CARD, "shadow": pal.SHADOW,
-    "rider_outline": pal.RIDER_OUTLINE, "current_ring": pal.CURRENT_RING,
+    "rider_outline": pal.RIDER_OUTLINE, "current_ring": pal.CURRENT_RING, "groups": GROUP_COLORS,
     "cyclist": {"wheel": CYCLIST_WHEEL, "frame": CYCLIST_FRAME, "skin": CYCLIST_SKIN, "height": CYCLIST_HEIGHT},
     "effects": {"rain": RAIN, "tailwind": TAILWIND, "headwind": HEADWIND,
                                                     "crosswind": CROSSWIND, "sunny": SUNNY},

@@ -17,6 +17,8 @@ def play_one_turn(ctl, pick=lambda hand: hand[0]):
         ctl.choose(pick(ctl.hand))
     assert ctl.phase == MOVEMENT
     ctl.advance()
+    if ctl.phase == FINISHED:  # un coureur a passé la ligne au mouvement : arrivée tout de suite
+        return
     assert ctl.phase == SLIPSTREAM
     ctl.advance()
     assert ctl.phase == EXHAUSTION
@@ -190,3 +192,49 @@ def test_simultaneous_choice_draws_every_hand_at_once():
     for _ in range(3):
         ctl.advance()
     assert ctl.game.turn == 1 and ctl.phase == CHOOSE and len(ctl.hands) == len(humans)
+
+
+def test_single_race_ends_right_after_the_movement():
+    # course unique : un coureur passe la ligne au mouvement -> arrivée tout de suite, sans aspiration ni fatigue
+    from flamme_rouge.track import Track
+
+    g = Game(Track("." * 12), num_teams=2, seed=0)
+    for rider, pos in zip(g.riders, (9, 8, 3, 2)):
+        rider.position = pos
+    ctl = TurnController(g)
+    while ctl.phase == CHOOSE:
+        ctl.choose(max(ctl.hand, key=lambda c: c.value))
+    ctl.advance()  # mouvement : la tête passe la ligne (case 12)
+    assert ctl.phase == FINISHED and g.finished and g.winner.position >= 12
+    assert g.turn == 1
+    texts = [line.text for line in ctl.drain_log()]
+    assert "Aspiration" not in texts and "Fatigue" not in texts and any("Victoire" in t for t in texts)
+
+
+def test_grand_tour_stage_still_applies_slipstream_and_fatigue():
+    from flamme_rouge.track import Track
+
+    g = Game(Track("." * 12), num_teams=2, seed=0, tour=True)
+    for rider, pos in zip(g.riders, (9, 8, 3, 2)):
+        rider.position = pos
+    ctl = TurnController(g)
+    while ctl.phase == CHOOSE:
+        ctl.choose(max(ctl.hand, key=lambda c: c.value))
+    ctl.advance()
+    assert ctl.phase == SLIPSTREAM  # le Grand Tour garde aspiration et fatigue avant les arrivées
+
+
+def test_history_records_every_step_of_the_race():
+    ctl = TurnController(Game(num_teams=3, seed=2))
+    while ctl.phase != FINISHED:
+        while ctl.phase == CHOOSE:
+            ctl.choose(ctl.hand[0])
+        if ctl.phase != FINISHED:
+            ctl.advance()
+    labels = [label for label, _where in ctl.history]
+    assert labels[0] == "Départ" and labels[1] == "Tour 1 · mouvement"
+    assert labels[-1].endswith("mouvement")  # course unique : on s'arrête sur le mouvement de l'arrivée
+    first, final = ctl.history[0][1], ctl.history[-1][1]
+    assert set(first) == set(ctl.game.riders)
+    assert all(final[r] == (r.position, r.lane) for r in ctl.game.riders)
+    assert all(a[1] != b[1] for a, b in zip(ctl.history, ctl.history[1:]))  # pas deux fois la même image
