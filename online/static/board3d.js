@@ -17,6 +17,7 @@ const ROAD_EDGE = "#e2e8f0", LANE_LINE = "#64748b", SQUARE_LINE = "#2a3444";
 const CURRENT_RING = "#fde047", CRASH_MARK = "#ff4d4f";
 const WHEEL = "#1e293b", FRAME = "#cbd5e1", SKIN = "#f1c27d";
 const WALL_SHADE = 0.55; // les côtés de la route, plus sombres que le dessus
+const SLICES = 6; // tranches d'une case droite : la route s'arrondit aux changements de pente
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
 const START_DEPTH = 0.14; // largeur de la ligne de départ blanche, en fraction de case
 const NUMBER_EVERY = 5; // numéro de case tous les 5 (et à l'arrivée)
@@ -48,6 +49,35 @@ class Road {
     this.z = scene.z;
     // altitude du milieu de chaque case (moyenne de ses bords), comme boardview.road_altitudes
     this.mid = this.squares.map((_, s) => (this.z[s] + this.z[s + 1]) / 2);
+    // pentes aux bords des cases pour une route qui s'arrondit (interpolation cubique monotone) : nulle au passage
+    // du plat à la montée ou de la montée à la descente, la moyenne des deux pentes au milieu d'une montée ;
+    // la route ne dépasse jamais l'altitude des bords (pas de bosse ni de creux inventés)
+    const z = this.z;
+    this.slopes = z.map((_, i) => {
+      if (i === 0 || i === z.length - 1) return 0;
+      const before = z[i] - z[i - 1], after = z[i + 1] - z[i];
+      return before * after <= 0 ? 0 : (before + after) / 2;
+    });
+  }
+
+  // altitude (en cases de dénivelé) au bord fractionnaire u : u = s au bord arrière de la case s, s + 1 devant
+  altitude(u) {
+    const last = this.z.length - 1;
+    u = Math.min(Math.max(u, 0), last);
+    const i = Math.min(Math.floor(u), last - 1), t = u - i;
+    if (last === 0) return this.z[0];
+    const t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * this.z[i] + (t3 - 2 * t2 + t) * this.slopes[i]
+      + (-2 * t3 + 3 * t2) * this.z[i + 1] + (t3 - t2) * this.slopes[i + 1];
+  }
+
+  // les bords gauche et droit d'une case, découpés finement (une ligne droite n'a que 2 points : la pente ne
+  // pourrait pas s'arrondir dessus)
+  paths(s) {
+    const { left, right } = this.squares[s];
+    if (left.length > 2) return { left, right };
+    const cut = (a, b) => Array.from({ length: SLICES + 1 }, (_, k) => lerp2(a, b, k / SLICES));
+    return { left: cut(left[0], left[1]), right: cut(right[0], right[1]) };
   }
 
   laneCenter(s, lane) { // comme SquareGeom.lane_center : 0 = file de droite
@@ -66,13 +96,12 @@ class Road {
     const f = p - i;
     const a = this.laneCenter(i, lane);
     const [x, y] = last === 0 ? a : lerp2(a, this.laneCenter(i + 1, lane), f);
-    const h = last === 0 ? this.mid[0] : lerp(this.mid[i], this.mid[i + 1], f);
-    return out.set(x, h * this.lift, -y);
+    return out.set(x, this.altitude(p + 0.5) * this.lift, -y); // le milieu de la case p est au bord p + ½
   }
 
   // hauteur de la route au point `k` (0 à m − 1) d'un bord de la case s
   heightAt(s, k, m) {
-    return lerp(this.z[s], this.z[s + 1], m > 1 ? k / (m - 1) : 0) * this.lift;
+    return this.altitude(s + (m > 1 ? k / (m - 1) : 0)) * this.lift;
   }
 
   build() {
@@ -82,7 +111,7 @@ class Road {
     const v = (x, y, h) => [x, h, -y];
     const n = this.data.n;
     this.squares.forEach((sq, s) => {
-      const { left, right } = sq, m = left.length;
+      const { left, right } = this.paths(s), m = left.length;
       const fill = new THREE.Color(sq.fill), wall = shade(sq.fill, WALL_SHADE);
       for (let k = 0; k < m - 1; k++) {
         const h0 = this.heightAt(s, k, m), h1 = this.heightAt(s, k + 1, m);
@@ -147,7 +176,7 @@ class Road {
   topGeometry(start, end, lift) {
     const top = [];
     for (let s = start; s < end; s++) {
-      const { left, right } = this.squares[s], m = left.length;
+      const { left, right } = this.paths(s), m = left.length;
       for (let k = 0; k < m - 1; k++) {
         const h0 = this.heightAt(s, k, m) + lift, h1 = this.heightAt(s, k + 1, m) + lift;
         const r0 = [right[k][0], h0, -right[k][1]], l0 = [left[k][0], h0, -left[k][1]];
@@ -196,14 +225,14 @@ const BB = [0, 0.1]; // le pédalier
 const CRANK = 0.045; // longueur d'une manivelle
 const THIGH = 0.12, SHIN = 0.125;
 const HANDS = [0.115, 0.235];
-const HEAD_OFFSET = [0.028, 0.05]; // le centre de la tête par rapport aux épaules
 const WHEEL_R = 0.085;
 const CADENCE = 2.2 * Math.PI * 2; // tours de pédalier par case parcourue (× 2π)
-const POSES = { // hanche et épaules, dans le repère du vélo
-  rouleur: { hip: [-0.035, 0.245], shoulder: [0.072, 0.34] },
-  sprinteur: { hip: [-0.03, 0.235], shoulder: [0.088, 0.3] },
-  danseuse: { hip: [0.015, 0.29], shoulder: [0.105, 0.35] },
-  descente: { hip: [-0.025, 0.245], shoulder: [0.098, 0.268] },
+const POSES = { // hanche, épaules et tête (par rapport aux épaules), dans le repère du vélo
+  rouleur: { hip: [-0.035, 0.245], shoulder: [0.072, 0.34], head: [0.028, 0.05] },
+  sprinteur: { hip: [-0.03, 0.235], shoulder: [0.088, 0.3], head: [0.028, 0.05] },
+  danseuse: { hip: [0.015, 0.29], shoulder: [0.105, 0.35], head: [0.028, 0.05] },
+  // recherche de vitesse : les fesses en arrière, le buste à plat, la poitrine sur le guidon, la tête basse
+  descente: { hip: [-0.06, 0.252], shoulder: [0.112, 0.252], head: [0.04, 0.03] },
 };
 const SHORTS = "#111827";
 const DUST = "#eadcb8";
@@ -263,7 +292,7 @@ class RiderView {
     const fill = new THREE.Color(colors.fill[r.team]);
     this.sprinter = r.name.endsWith("S");
     this.base = this.sprinter ? POSES.sprinteur : POSES.rouleur;
-    this.pose = { hip: [...this.base.hip], shoulder: [...this.base.shoulder] };
+    this.pose = { hip: [...this.base.hip], shoulder: [...this.base.shoulder], head: [...this.base.head] };
     const lambert = (color) => new THREE.MeshLambertMaterial({ color });
     const team = lambert(fill), skin = lambert(SKIN), dark = lambert(WHEEL), metal = lambert(FRAME);
     const shorts = lambert(SHORTS);
@@ -419,14 +448,19 @@ class RiderView {
     const moving = moved > 1e-4 && !crashed;
     const square = road.squares[Math.min(Math.max(Math.round(p), 0), road.squares.length - 1)];
     // en danseuse dans les montées, même à l'arrêt (on voit qui grimpe) ; recroquevillé en descente quand il roule
-    const target = square.kind === "A" ? POSES.danseuse : moving && square.kind === "D" ? POSES.descente : this.base;
+    // en danseuse dans les montées, écrasé sur le guidon dans les descentes, même à l'arrêt (on voit le relief)
+    const target = square.kind === "A" ? POSES.danseuse : square.kind === "D" ? POSES.descente : this.base;
     const k = Math.min(1, dt * 6); // la posture change en douceur
-    for (const key of ["hip", "shoulder"]) {
+    for (const key of ["hip", "shoulder", "head"]) {
       this.pose[key][0] = lerp(this.pose[key][0], target[key][0], k);
       this.pose[key][1] = lerp(this.pose[key][1], target[key][1], k);
     }
     const travel = moved / RIDER_SCALE;
     if (moving && square.kind !== "D") this.crank -= travel * CADENCE; // en descente : roue libre
+    else if (square.kind === "D") { // pédales à plat pour la descente
+      const level = Math.round(this.crank / Math.PI) * Math.PI;
+      this.crank = lerp(this.crank, level, k);
+    }
     if (moving) this.wheel -= travel / WHEEL_R;
     this.wheels.forEach((w) => { w.rotation.z = this.wheel; });
     this.crankSet.rotation.z = this.crank;
@@ -469,7 +503,8 @@ class RiderView {
     stretch(this.torso, v(...hip), v(...shoulder), this.torso.userData.width);
     this.torso.scale.y /= 0.22; // la capsule mesure 0,22 de haut
     // la tête posée au bout du buste, un peu au-dessus (le regard vers la route devant), reliée par le cou
-    this.head.position.set(shoulder[0] + HEAD_OFFSET[0], shoulder[1] + HEAD_OFFSET[1], 0);
+    const head = this.pose.head;
+    this.head.position.set(shoulder[0] + head[0], shoulder[1] + head[1], 0);
     this.head.rotation.z = -0.25;
     stretch(this.neck, v(shoulder[0] - 0.01, shoulder[1] - 0.005), v(this.head.position.x - 0.01, this.head.position.y - 0.02), 0.9);
     this.arms.forEach((arm, i) => {

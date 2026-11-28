@@ -126,11 +126,11 @@ route seulement s'il ne l'a pas.
 - Quand la 3D est au point, supprimer `iso.py` et le code `proj` de `boardview.py`.
 - Garder les visuels **faits maison** : pas d'images officielles de la boîte (voir `portage_bga.md`).
 
-Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage (côtés jusqu'au sol,
+Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage, qui s'arrondit aux changements de pente (interpolation cubique monotone de l'altitude : ni bosse ni creux inventés), (côtés jusqu'au sol,
 sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs articulés avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit : roues à
 rayons et pédalier qui tournent avec la distance, jambes qui suivent les pédales, en danseuse dans les montées, même à
-l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent des tempes et de la nuque, glissent le long du cou et tombent, recroquevillés en roue libre dans les descentes ; le rouleur droit, le sprinteur bas et
+l'arrêt (le vélo se balance quand il roule), avec des gouttes de sueur qui perlent des tempes et de la nuque, glissent le long du cou et tombent, écrasés sur le guidon en roue libre dans les descentes, pédales à plat, même à l'arrêt (recherche de vitesse) ; le rouleur droit, le sprinteur bas et
 trapu ; vélo avec selle, penché comme la route (nez en l'air en montée, en bas en descente) ; maillot à la couleur de l'équipe, casque et lunettes ; pendant l'aspiration, une
 poche d'air derrière celui qui protège et des traits de vitesse derrière l'aspiré ; après une chute, le vélo
 couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; au clic sur
