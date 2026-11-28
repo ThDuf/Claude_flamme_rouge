@@ -129,8 +129,9 @@ route seulement s'il ne l'a pas.
 Fait ainsi : `board3d.js` est chargé seulement quand on choisit « Vue 3D ». Route en maillage (côtés jusqu'au sol,
 sauf après l'arrivée, où la route peut passer au-dessus d'une autre), bords, files, traits entre cases, damier
 d'arrivée ; coureurs en volume avec ombre portée, nom au-dessus, anneau doré pour celui qui choisit, couchés et
-cerclés de rouge après une chute ; pluie, vent et soleil animés. Caméra : glisser = tourner, clic droit = déplacer,
-molette ou ＋/－ = zoom, ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
+cerclés de rouge après une chute ; pluie, vent et soleil animés ; lignes de départ (blanche) et d'arrivée
+(damier), avec leur nom. Caméra : clic gauche = déplacer, clic molette (ou droit) = tourner, molette ou ＋/－ = zoom,
+⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
 la relecture. Le podium reste en 2D. Three.js 0.170.0 est copié tel quel (paquet npm, licence MIT) dans
 `online/static/vendor/three-0.170.0/` : le module minifié, `OrbitControls` et `CSS2DRenderer`, reliés par une
 « import map » dans `index.html`. Le numéro de version est dans le chemin : le serveur laisse le navigateur garder

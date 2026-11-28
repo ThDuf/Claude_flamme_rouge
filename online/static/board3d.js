@@ -18,6 +18,7 @@ const CURRENT_RING = "#fde047", CRASH_MARK = "#ff4d4f";
 const WHEEL = "#1e293b", FRAME = "#cbd5e1", SKIN = "#f1c27d";
 const WALL_SHADE = 0.55; // les côtés de la route, plus sombres que le dessus
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
+const START_DEPTH = 0.14; // largeur de la ligne de départ blanche, en fraction de case
 const NUMBER_EVERY = 5; // numéro de case tous les 5 (et à l'arrivée)
 const FOLLOW_DISTANCE = 7; // distance de la caméra au groupe suivi, en cases
 const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
@@ -118,7 +119,7 @@ class Road {
     };
     group.add(lines(edges, ROAD_EDGE), lines(lanes, LANE_LINE), lines(cross, SQUARE_LINE));
     group.add(this.line(n, checkerTexture(), 0.22));
-    if (this.data.start > 0) group.add(this.line(this.data.start, null, 0.08));
+    group.add(this.line(this.data.start, null, START_DEPTH)); // ligne de départ (case 0 sans grille de départ)
     return group;
   }
 
@@ -132,7 +133,7 @@ class Road {
     g.setAttribute("position", new THREE.Float32BufferAttribute([
       r[0], h, -r[1], l[0], h, -l[1], lf[0], h, -lf[1], r[0], h, -r[1], lf[0], h, -lf[1], rf[0], h, -rf[1]], 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1], 2));
-    return new THREE.Mesh(g, new THREE.MeshBasicMaterial(texture ? { map: texture } : { color: "#ffffff" }));
+    return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ ...(texture ? { map: texture } : { color: "#ffffff" }), side: THREE.DoubleSide }));
   }
 
   bounds() {
@@ -373,7 +374,14 @@ export function createBoard3D(container, colors) {
   controls.maxPolarAngle = Math.PI * 0.47; // jamais sous le sol
   controls.minDistance = 1.5;
   controls.maxDistance = 120;
-  controls.screenSpacePanning = false; // glisser du clic droit : on se déplace sur le sol
+  controls.screenSpacePanning = false; // on se déplace sur le sol, pas vers le ciel
+  // clic gauche = déplacer la caméra, clic molette (ou droit) = changer d'angle, molette = zoom ;
+  // au doigt : un doigt déplace, deux doigts zooment et tournent
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.ROTATE };
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+  // le clic molette ne lance pas le défilement automatique du navigateur, et le clic droit pas son menu
+  renderer.domElement.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });
+  renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
   scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x2a4a35, 1.6));
   const sunLight = new THREE.DirectionalLight(0xffffff, 1.8);
@@ -414,6 +422,7 @@ export function createBoard3D(container, colors) {
     // numéros de case (tous les 5) et l'arrivée
     for (let s = 0; s < data.n; s += NUMBER_EVERY) addTag(String(s), s, -1.1, "num3d");
     addTag("ARRIVÉE", data.n, 1, "finish3d", 0.7);
+    addTag("DÉPART", data.start, 1, "finish3d", 0.7);
     const box = road.bounds(), size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
     ground = new THREE.Mesh(new THREE.PlaneGeometry(size.x + 60, size.z + 60),
                             new THREE.MeshLambertMaterial({ color: GROUND }));
