@@ -1032,8 +1032,12 @@ def profile_primitives(
     weather: Optional[Weather] = None,
     tokens: Optional[Sequence[TokenStack]] = None,
     jerseys: Optional[dict] = None,
+    text: bool = True,
 ) -> list[tuple]:
     """Profil de l'étape (vue de côté) : montées en orange, descentes en bleu, plat en gris, cols catégorisés.
+
+    `text=False` (l'écran de course) : aucune écriture (titre, numéros de case, ARRIVÉE, badges de col) sauf le nom
+    des groupes de coureurs.
 
     `marker` (une case, éventuellement fractionnaire) dessine un trait pour situer un coureur.
     `riders` place les coureurs sur le profil et nomme la tête de course, le peloton et la lanterne rouge."""
@@ -1051,11 +1055,13 @@ def profile_primitives(
     step = 10 if n > 40 else 5
     for s in range(0, n + 1, step):
         prims.append(("line", x_of(s), base, x_of(s), base + 4, pal.FAINT, 1))
-        prims.append(("text", x_of(s), base + 13, str(s), pal.MUTED, 8, False, "center"))
+        if text:
+            prims.append(("text", x_of(s), base + 13, str(s), pal.MUTED, 8, False, "center"))
     if track.start:
         prims.append(("line", x_of(track.start), y_at(track.start) - 8, x_of(track.start), base, "#ffffff", 2))
     prims.append(("line", x_of(n), PROFILE_PAD_TOP - 4, x_of(n), base, "#ffffff", 3))
-    prims.append(("text", x_of(n), PROFILE_PAD_TOP - 12, "ARRIVÉE", "#ffffff", 8, True, "center"))
+    if text:
+        prims.append(("text", x_of(n), PROFILE_PAD_TOP - 12, "ARRIVÉE", "#ffffff", 8, True, "center"))
     climb = sum(1 for s in range(n) if track.kind(s) == ASCENT)
     drop = sum(1 for s in range(n) if track.kind(s) == DESCENT)
     title = f"Profil : {climb} cases de montée ▲  ·  {drop} cases de descente ▼"
@@ -1073,12 +1079,13 @@ def profile_primitives(
         title += "  ·  pavés"
     if any(track.surface(s) == SUPPLY for s in range(n)):
         title += "  ·  ravitaillement"
-    prims.append(("text", PROFILE_PAD_X, PROFILE_TITLE_Y, title, pal.MUTED, 9, True, "w"))
-    title_right = PROFILE_PAD_X + 6.5 * len(title)  # largeur approchée du titre (police 9 grasse)
+    if text:
+        prims.append(("text", PROFILE_PAD_X, PROFILE_TITLE_Y, title, pal.MUTED, 9, True, "w"))
+    title_right = PROFILE_PAD_X + 6.5 * len(title) if text else 0  # largeur approchée du titre (police 9 grasse)
 
     # badge rouge incliné au sommet de chaque col, avec sa catégorie
     boxes: list[tuple[float, float, float]] = []  # (gauche, droite, milieu en y) des étiquettes déjà posées
-    for _first, top, category in climbs(track):
+    for _first, top, category in climbs(track) if text else ():
         bw, bh = (24, 15) if category == "HC" else (17, 15)
         cx = x_of(top)
         if top >= n:  # arrivée au sommet : le badge se met à gauche de la ligne d'arrivée

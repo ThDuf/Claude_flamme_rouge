@@ -450,3 +450,16 @@ def test_the_riders_camera_frames_every_rider():
     from flamme_rouge.boardview import follow_window
     assert follow_window(room.game, "course") == (0, front + 5)  # du dernier au premier, et 5 cases devant
     assert view("course") != view("tete") and view("course") != view("peloton")
+
+
+def test_the_race_profile_only_writes_the_group_names():
+    api = Api()
+    created = api.handle("POST", "/api/create", {}, {"name": "Alice"})
+    code, token = created["code"], created["token"]
+    api.handle("POST", "/api/start", {}, {"code": code, "token": token})
+    race = api.handle("GET", "/api/state", {"code": code, "token": token}, {})["race"]
+    texts = [shape[3] for shape in race["profile"] if shape[0] == "text"]
+    assert texts and all(t.startswith(("TÊTE", "PELOTON", "LANTERNE ROUGE")) for t in texts)
+    from flamme_rouge.boardview import profile_primitives  # ailleurs (salon), le profil garde ses écritures
+    full = profile_primitives(api.lobby.room(code).game.track, 1000, 100)
+    assert any(s[0] == "text" and s[3].startswith("Profil") for s in full)

@@ -525,7 +525,8 @@ class Room:
                 "view": list(view or map_transform(g, proj=proj)),  # le cadrage utilisé : point de départ des zooms
                 "iso_angle": angle,
                 "map": map_primitives(g, rider, view=view, proj=proj),
-                "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather,
+                # le profil de course : sans écritures, sauf le nom des groupes
+                "profile": profile_primitives(g.track, BOARD_W, PROFILE_H, riders=g.riders, weather=g.weather, text=False,
                                               jerseys=g.jerseys),
                 # pour les animations du navigateur : la route sans coureurs, sa géométrie, celle du profil
                 "map_base": map_primitives(g, view=view, draw_riders=False, proj=proj),
@@ -543,7 +544,7 @@ class Room:
                 shared["podium"] = podium_primitives(g, BOARD_W, MAP_H, 8.0, names)
                 # pour revoir la course : le profil sans les coureurs (la page les place selon la relecture) et
                 # les positions de chaque coureur à chaque étape (départ, mouvements, aspirations)
-                shared["profile_base"] = profile_primitives(g.track, BOARD_W, PROFILE_H, weather=g.weather)
+                shared["profile_base"] = profile_primitives(g.track, BOARD_W, PROFILE_H, weather=g.weather, text=False)
                 shared["history"] = [{"label": label, "pos": {r.name: [p, lane] for r, (p, lane) in where.items()}}
                                      for label, where in ctl.history]
             self._cache[key] = shared
