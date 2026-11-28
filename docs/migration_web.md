@@ -136,7 +136,7 @@ poche d'air derrière celui qui protège et des traits de vitesse derrière l'as
 couché d'un côté, le coureur allongé de l'autre, un nuage de poussière et l'anneau rouge ; au clic sur
 « Fatigue », ceux qui prennent une carte Fatigue (`fatigue` dans l'état : {id, names}, comme `anim`) virent au
 rouge pendant quelques secondes, avec un halo rouge qui pulse, un anneau qui s'élargit au sol et « +Fatigue » sur
-leur étiquette ; caméra « Vue coureurs » (2D et 3D) : tous les coureurs dans le cadre, du dernier au premier ; lignes de départ (blanche) et d'arrivée
+leur étiquette ; caméra « Vue course » (2D et 3D) : tous les coureurs dans le cadre, du dernier au premier, et les 10 prochaines cases ; lignes de départ (blanche) et d'arrivée
 (damier), avec leur nom. Caméra : clic gauche = déplacer, clic molette (ou droit) = tourner, molette ou ＋/－ = zoom,
 ⟲ ⟳ = 30° ; « Zoom peloton » et « Zoom tête de course » suivent le groupe, aussi pendant
 la relecture. Le podium reste en 2D. Météo : la pluie tombe d'un nuage gris en gouttes biaisées, éclabousse et

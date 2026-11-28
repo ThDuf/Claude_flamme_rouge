@@ -59,7 +59,8 @@ qui rejoint avec le code.
   est en 3D : nuage, pluie, éclaboussures et route mouillée ; rafales, feuilles emportées et manche à air
   tournée dans le sens du vent. Dans le salon, le même bouton montre en 3D le parcours choisi. Three.js est servi par le site
   lui-même (`online/static/vendor/`) : la 3D marche aussi sans internet, en local.
-- Caméra : tout le parcours, zoom peloton, zoom tête de course ou vue coureurs (tous les coureurs dans le cadre ;
+- Caméra : tout le parcours, zoom peloton, zoom tête de course ou vue course (tous les coureurs dans le cadre
+  et les 10 prochaines cases ;
   chacun la sienne), ou cadrage libre : molette,
   boutons ＋/－, glisser la carte. Le navigateur agrandit tout de suite ce qu'il a, puis le serveur envoie un dessin
   net de ce cadrage. Les canvas ont autant de pixels qu'ils en occupent à l'écran : la carte reste nette.

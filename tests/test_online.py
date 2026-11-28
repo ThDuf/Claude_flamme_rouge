@@ -448,5 +448,5 @@ def test_the_riders_camera_frames_every_rider():
         return api.handle("GET", "/api/state", {"code": code, "token": token, "camera": camera}, {})["race"]["view"]
 
     from flamme_rouge.boardview import follow_window
-    assert follow_window(room.game, "coureurs") == (0, front + 6)  # du dernier au premier, avec de la marge
-    assert view("coureurs") != view("tete") and view("coureurs") != view("peloton")
+    assert follow_window(room.game, "course") == (0, front + 10)  # du dernier au premier, et 10 cases devant
+    assert view("course") != view("tete") and view("course") != view("peloton")

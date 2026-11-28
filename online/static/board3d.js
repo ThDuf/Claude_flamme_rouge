@@ -20,7 +20,8 @@ const WALL_SHADE = 0.55; // les côtés de la route, plus sombres que le dessus
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
 const START_DEPTH = 0.14; // largeur de la ligne de départ blanche, en fraction de case
 const NUMBER_EVERY = 5; // numéro de case tous les 5 (et à l'arrivée)
-const FOLLOW_DISTANCE = 7; // distance de la caméra au groupe suivi, en cases
+const FOLLOW_DISTANCE = 7;
+const RACE_VIEW_AHEAD = 10; // vue course : les 10 prochaines cases devant le premier coureur (boardview.RACE_VIEW_AHEAD) // distance de la caméra au groupe suivi, en cases
 const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
 const FIT_MARGIN = 0.92; // vue d'ensemble : le parcours occupe 92 % du cadre
 const RIDER_SCALE = 1.5; // les coureurs un peu plus grands que nature : on les voit de loin
@@ -947,19 +948,26 @@ export function createBoard3D(container, colors) {
 
   // le cadrage : tout le parcours, ou un groupe suivi ; la caméra garde l'angle choisi par le joueur
   // la boîte qui contient tous les coureurs (un peu de marge autour, et leur hauteur)
+  // vue course : tous les coureurs, et la route sur les 10 prochaines cases devant le premier
   function ridersBox(list) {
     const box = new THREE.Box3(), at = new THREE.Vector3();
-    for (const r of list) {
-      road.point(r.p, r.lane, at);
+    const add = (p, lane) => {
+      road.point(p, lane, at);
       box.expandByPoint(at);
       box.expandByPoint(at.clone().setY(at.y + 0.8));
+    };
+    for (const r of list) add(r.p, r.lane);
+    const front = Math.max(...list.map((r) => r.p)), last = road.squares.length - 1;
+    for (let p = Math.ceil(front); p <= Math.min(front + RACE_VIEW_AHEAD, last); p++) {
+      add(p, 0);
+      add(p, road.squares[Math.min(p, last)].lanes - 1);
     }
     return box.expandByScalar(0.9);
   }
 
   function target(which, list) {
     if (!which || !list.length) return null;
-    if (which === "coureurs") return ridersBox(list).getCenter(new THREE.Vector3());
+    if (which === "course") return ridersBox(list).getCenter(new THREE.Vector3());
     const sorted = list.slice().sort((a, b) => b.p - a.p);
     const groups = [];
     for (const r of sorted) {
@@ -986,8 +994,8 @@ export function createBoard3D(container, colors) {
     }
     if (instant || offset.lengthSq() < 1e-6) offset.set(0, 1.1, 1); // de face, vu d'en haut à 48°
     if (!followed) distance = fitDistance(box, center, offset);
-    // vue coureurs : tous dans le cadre, au plus près (jamais plus près qu'un zoom de suivi)
-    else if (follow === "coureurs") distance = Math.max(fitDistance(ridersBox(list), center, offset), FOLLOW_DISTANCE * 0.8);
+    // vue course : tous dans le cadre avec la route devant, au plus près (jamais plus près qu'un zoom de suivi)
+    else if (follow === "course") distance = Math.max(fitDistance(ridersBox(list), center, offset), FOLLOW_DISTANCE * 0.8);
     offset.setLength(distance);
     const to = { target: center, position: center.clone().add(offset) };
     if (instant) {
