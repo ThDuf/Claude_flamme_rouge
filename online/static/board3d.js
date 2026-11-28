@@ -20,8 +20,8 @@ const WALL_SHADE = 0.55; // les côtés de la route, plus sombres que le dessus
 const LINE_LIFT = 0.006; // les traits flottent juste au-dessus de la route (pas de scintillement)
 const START_DEPTH = 0.14; // largeur de la ligne de départ blanche, en fraction de case
 const NUMBER_EVERY = 5; // numéro de case tous les 5 (et à l'arrivée)
-const FOLLOW_DISTANCE = 7;
-const RACE_VIEW_AHEAD = 10; // vue course : les 10 prochaines cases devant le premier coureur (boardview.RACE_VIEW_AHEAD) // distance de la caméra au groupe suivi, en cases
+const FOLLOW_DISTANCE = 7; // distance de la caméra au groupe suivi, en cases
+const RACE_VIEW_AHEAD = 5; // vue course : les 5 prochaines cases devant le premier coureur (boardview.RACE_VIEW_AHEAD)
 const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
 const FIT_MARGIN = 0.92; // vue d'ensemble : le parcours occupe 92 % du cadre
 const RIDER_SCALE = 1.5; // les coureurs un peu plus grands que nature : on les voit de loin
@@ -948,7 +948,7 @@ export function createBoard3D(container, colors) {
 
   // le cadrage : tout le parcours, ou un groupe suivi ; la caméra garde l'angle choisi par le joueur
   // la boîte qui contient tous les coureurs (un peu de marge autour, et leur hauteur)
-  // vue course : tous les coureurs, et la route sur les 10 prochaines cases devant le premier
+  // vue course : tous les coureurs, et la route sur les 5 prochaines cases devant le premier
   function ridersBox(list) {
     const box = new THREE.Box3(), at = new THREE.Vector3();
     const add = (p, lane) => {

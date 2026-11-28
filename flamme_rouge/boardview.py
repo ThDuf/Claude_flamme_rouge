@@ -926,14 +926,14 @@ def race_groups(riders: Sequence[Rider]) -> list[list[Rider]]:
 
 FOLLOW_PELOTON, FOLLOW_HEAD, FOLLOW_ALL = "peloton", "tete", "course"
 FOLLOW_AHEAD = 6  # cases montrées devant le groupe suivi (zoom peloton, tête de course)
-RACE_VIEW_AHEAD = 10  # vue course : les 10 prochaines cases devant le premier coureur
+RACE_VIEW_AHEAD = 5  # vue course : les 5 prochaines cases devant le premier coureur
 FOLLOW_MIN_SQUARES = 14  # un zoom de suivi montre au moins ces cases (sinon la carte serait trop grossie)
 
 
 def follow_window(game: Game, which: str) -> Optional[tuple[int, int]]:
     """Cases à cadrer pour suivre un groupe : `FOLLOW_PELOTON` (le plus gros groupe, à égalité le plus en avant),
     `FOLLOW_HEAD` (la tête de course) ou `FOLLOW_ALL` (la vue course : tous les coureurs, du dernier au premier, et
-    les 10 prochaines cases devant le premier). None s'il n'y a plus de coureur en course."""
+    les 5 prochaines cases devant le premier). None s'il n'y a plus de coureur en course."""
     groups = race_groups(game.riders)
     if not groups:
         return None
