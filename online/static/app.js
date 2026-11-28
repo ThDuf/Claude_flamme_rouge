@@ -523,7 +523,7 @@ function makeAnimation(data) { // comme movement_animation / slipstream_animatio
     stagger = duration + MOVE_GAP;
   }
   return {
-    moves, duration, stagger,
+    kind: data.kind, moves, duration, stagger,
     total: moves.length ? stagger * (moves.length - 1) + duration : 0,
     positions(t) {
       const out = {};
@@ -802,11 +802,12 @@ function show3d() {
 }
 
 // les coureurs pour la vue 3D : leur place, ou celle de l'animation ou de la relecture en cours
-function riderList(race, positions) {
+// `drafting` : les coureurs aspirés de l'animation en cours (la vue 3D montre l'aspiration)
+function riderList(race, positions, drafting = false) {
   return race.riders.map((r) => {
     const at = positions[r.name];
     return { name: r.name, team: r.team, crashed: !!r.crashed && !at, p: at ? at[0] : r.position,
-             lane: at ? at[1] : r.lane };
+             lane: at ? at[1] : r.lane, draft: drafting && !!at };
   });
 }
 
@@ -1001,7 +1002,8 @@ function frame(now) {
       rest = race.history[Math.min(Math.round(session.replay.t), race.history.length - 1)].pos;
     }
     const shown = session.anim ? session.anim.race : race;
-    session.board3d.draw({ list: riderList(shown, positions), rest: riderList(race, rest), follow: session.camera,
+    const drafting = !!session.anim && session.anim.anim.kind !== "movement";
+    session.board3d.draw({ list: riderList(shown, positions, drafting), rest: riderList(race, rest), follow: session.camera,
       current: race.rider && race.rider.name, zones: race.weather, t, animate: session.animate });
     paint($("map-fx"), [], w, h);
     if (weather) profileShapes = profileShapes.concat(profileWeatherShapes(race, t));
