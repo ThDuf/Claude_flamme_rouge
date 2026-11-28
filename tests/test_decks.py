@@ -4,7 +4,7 @@ import pytest
 
 from flamme_rouge import ROULEUR, Game, Track
 from flamme_rouge.cards import starting_deck
-from flamme_rouge.controller import CHOOSE, TurnController
+from flamme_rouge.controller import CHOOSE, EXHAUSTION, MOVEMENT, SLIPSTREAM, TurnController
 from flamme_rouge.decks import all_decks_text, deck_rows, deck_text
 
 
@@ -36,7 +36,7 @@ def test_energy_cards_are_never_lost_or_duplicated(seed):
             ctl.choose(ctl.hand[0])
             for r in g.riders:  # même en plein milieu du choix des cartes
                 assert Counter(energy_cards(r)) == expected[r]
-        for _ in range(3):
+        while ctl.phase in (MOVEMENT, SLIPSTREAM, EXHAUSTION):  # l'arrivée peut couper le tour après le mouvement
             ctl.advance()
         for r in g.riders:
             assert Counter(energy_cards(r)) == expected[r]

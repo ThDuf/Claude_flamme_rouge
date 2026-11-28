@@ -278,3 +278,30 @@ def test_online_3d_view_is_an_option():
     assert auto["iso_angle"] % 90 in (30, 45, 60) and auto["geo"]["iso"] is True
     assert race(iso="390")["iso_angle"] == 30  # 390° = 30°
     assert race(iso="abc")["iso_angle"] is None  # illisible : carte 2D, sans erreur
+
+
+def test_finished_race_sends_its_history_for_the_replay():
+    api = Api()
+    code, alice, _bob = lobby_of_two(api)
+    call(api, "/api/settings", code=code, token=alice, seats=["joueur", "ia"])
+    call(api, "/api/start", code=code, token=alice)
+    room = api.lobby.room(code)
+    from flamme_rouge.ai import choose_card
+    for _ in range(400):
+        ctl = room.ctl
+        if ctl.phase == FINISHED:
+            break
+        if ctl.phase == CHOOSE:
+            for rider, hand in list(ctl.hands.items()):
+                ctl.choose_for(rider, choose_card(room.game, rider, hand))
+        else:
+            ctl.advance()
+        room.bump()
+    race = call(api, "/api/state", "GET", code=code, token=alice)["race"]
+    assert race["finished"] and race["history"][0]["label"] == "Départ"
+    names = {r["name"] for r in race["riders"]}
+    assert set(race["history"][-1]["pos"]) == names
+    # le profil sans coureurs (la page y place les coureurs de la relecture) : ni pastilles ni groupes
+    dots = lambda prims: [p for p in prims if p[0] == "oval" and p[6] == "#ffffff"]  # noqa: E731
+    assert len(dots(race["profile"])) == len(names) and dots(race["profile_base"]) == []
+    assert not any(p[0] == "text" and "PELOTON" in str(p[3]) for p in race["profile_base"])

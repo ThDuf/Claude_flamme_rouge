@@ -14,13 +14,14 @@ Les règles viennent du moteur (flamme_rouge) ; ce fichier ne fait qu'afficher e
 """
 import argparse
 import time
+from dataclasses import replace
 import tkinter as tk
 from tkinter import messagebox
 
 import ui
 from flamme_rouge import ROULEUR, Game
 from flamme_rouge import palette as pal
-from flamme_rouge.animation import FRAME_MS, moves_between, movement_animation, slipstream_animation, snapshot
+from flamme_rouge.animation import FRAME_MS, ease, moves_between, movement_animation, slipstream_animation, snapshot
 from flamme_rouge.boardview import FOLLOW_HEAD, FOLLOW_PELOTON, follow_view, jersey_primitives
 from flamme_rouge.iso import best_angle, projection
 from flamme_rouge.stage import MOUNTAIN, SPRINT, format_time
@@ -54,7 +55,7 @@ PHASE_INFO = {
     MOVEMENT: "Toutes les cartes sont posées. Clique sur le bouton pour les révéler et lancer le mouvement.",
     SLIPSTREAM: "Regarde le plateau, puis lance l'aspiration.",
     EXHAUSTION: "Regarde le plateau, puis passe à la fatigue.",
-    FINISHED: "Clic sur le podium pour revoir la course ; retourne au menu pour refaire une partie.",
+    FINISHED: "« Revoir la course » (sous la carte) rejoue toute la course, avec une barre de progression.",
 }
 ACTION_TEXT = {
     BREAKAWAY: "Enchères de l'échappée…",
@@ -177,7 +178,24 @@ class App:
         self.profile = tk.Canvas(board_card, width=BOARD_W, height=PROFILE_H, bg=pal.CARD, highlightthickness=0)
         self.profile.pack(padx=1, pady=(0, 1))
 
-        bar = tk.Frame(root, bg=pal.BG)
+        # revoir la course (à l'arrivée) : lecture / pause, barre de progression, étape montrée, retour au podium
+        self.replay_bar = rb = tk.Frame(root, bg=pal.BG)
+        self.replay_toggle = ui.FlatButton(rb, "⟲  Revoir la course", self.toggle_replay, style="primary", size=10,
+                                           padx=12, pady=5)
+        self.replay_toggle.pack(side="left")
+        self.replay_play = ui.FlatButton(rb, "▶", self.replay_play_pause, size=11, padx=12, pady=4)
+        self.replay_var = tk.DoubleVar(value=0.0)
+        self.replay_scale = tk.Scale(rb, from_=0, to=1, resolution=0.01, orient="horizontal", showvalue=False,
+                                     variable=self.replay_var, command=self._on_replay_scale, bg=pal.BG,
+                                     troughcolor=pal.CARD_HI, activebackground=pal.ACCENT, highlightthickness=0,
+                                     bd=0, sliderlength=18, width=12, length=420)
+        self.replay_label = tk.Label(rb, text="", font=ui.font(10, True), bg=pal.BG, fg=pal.TEXT)
+        self.replay_t = 0.0  # position dans l'historique (fractionnaire : entre deux étapes)
+        self.replay_playing = False
+        self.replay_job = None
+        self._replay_from_code = False
+
+        bar = self.tool_bar = tk.Frame(root, bg=pal.BG)
         bar.pack(fill="x", padx=14, pady=(8, 0))
         ui.FlatButton(bar, "＋", lambda: self.zoom_at(1.4), size=11, padx=12, pady=4).pack(side="left")
         ui.FlatButton(bar, "－", lambda: self.zoom_at(1 / 1.4), size=11, padx=12, pady=4).pack(side="left", padx=(4, 0))
@@ -295,6 +313,8 @@ class App:
             self.close()
             self.on_stage_end()
             return
+        if phase == FINISHED:  # course unique terminée : plus rien à faire avancer
+            return
         before = snapshot(self.game.riders)
         self.ctl.advance()
         self.revealed = False
@@ -395,11 +415,124 @@ class App:
         self._drag = None
         if moved:
             return
-        if self.ctl.phase == FINISHED and self.anim is None:  # podium <-> course
-            self.show_podium = not self.show_podium
-            self._paint_map()
+        if self.ctl.phase == FINISHED and self.anim is None:  # podium <-> revoir la course
+            self.toggle_replay()
             return
         self.skip_animation()
+
+    # ------------------------------------------------------------ revoir la course
+
+    REPLAY_STEP_S = 0.8  # durée d'une étape de l'historique pendant la lecture
+
+    def _replay_active(self) -> bool:
+        return self.ctl.phase == FINISHED and self.anim is None and not self.show_podium and len(self.ctl.history) > 1
+
+    def _replay_positions(self) -> dict:
+        """Positions des coureurs à l'instant `replay_t` de l'historique (entre deux étapes : en douceur)."""
+        history = self.ctl.history
+        last = len(history) - 1
+        t = min(max(self.replay_t, 0.0), float(last))
+        i = min(int(t), max(last - 1, 0))
+        f = ease(t - i)
+        a, b = history[i][1], history[min(i + 1, last)][1]
+        out = {}
+        for rider in self.game.riders:
+            if rider in a and rider in b:
+                (p0, l0), (p1, l1) = a[rider], b[rider]
+                out[rider] = (p0 + (p1 - p0) * f, l0 + (l1 - l0) * f)
+        return out
+
+    def toggle_replay(self) -> None:
+        """Podium -> revoir la course (lecture depuis le départ) ; course -> podium."""
+        if self.ctl.phase != FINISHED:
+            return
+        self.show_podium = not self.show_podium
+        if self.show_podium:
+            self._replay_stop()
+        else:
+            self.replay_t = 0.0
+            self._replay_start()
+        self._show_replay_bar()
+        self._paint_map()
+
+    def replay_play_pause(self) -> None:
+        if self.replay_playing:
+            self._replay_stop()
+        else:
+            if self.replay_t >= len(self.ctl.history) - 1:  # à la fin : on recommence
+                self.replay_t = 0.0
+            self._replay_start()
+        self._show_replay_bar()
+
+    def _replay_start(self) -> None:
+        self.replay_playing = True
+        self._replay_last = time.monotonic()
+        if self.replay_job is None:
+            self.replay_job = self.root.after(FRAME_MS, self._replay_tick)
+
+    def _replay_stop(self) -> None:
+        self.replay_playing = False
+        if self.replay_job is not None:
+            self.root.after_cancel(self.replay_job)
+            self.replay_job = None
+
+    def _replay_tick(self) -> None:
+        self.replay_job = None
+        if not self.replay_playing or not self._replay_active():
+            self.replay_playing = False
+            return
+        now = time.monotonic()
+        self.replay_t += (now - self._replay_last) / self.REPLAY_STEP_S
+        self._replay_last = now
+        last = len(self.ctl.history) - 1
+        if self.replay_t >= last:  # arrivée : on s'arrête sur la dernière image
+            self.replay_t = float(last)
+            self.replay_playing = False
+        self._sync_replay_bar()
+        self._paint_map()
+        if self.replay_playing:
+            self.replay_job = self.root.after(FRAME_MS, self._replay_tick)
+        else:
+            self._show_replay_bar()
+
+    def _on_replay_scale(self, value) -> None:
+        """La barre de progression déplacée à la souris : on se place à cet instant (et la lecture s'arrête)."""
+        if self._replay_from_code:
+            return
+        self._replay_stop()
+        self.replay_t = float(value)
+        self._sync_replay_bar()
+        self._show_replay_bar()
+        self._paint_map()
+
+    def _sync_replay_bar(self) -> None:
+        self._replay_from_code = True
+        self.replay_var.set(self.replay_t)
+        self._replay_from_code = False
+        history = self.ctl.history
+        step = min(int(round(self.replay_t)), len(history) - 1)
+        self.replay_label.config(text=f"{history[step][0]}   ({step + 1}/{len(history)})")
+
+    def _show_replay_bar(self) -> None:
+        """À l'arrivée : la barre sous la carte (podium : « Revoir la course » ; course : lecture et progression)."""
+        bar = self.replay_bar
+        finished = self.ctl.phase == FINISHED and len(self.ctl.history) > 1
+        if not finished:
+            bar.pack_forget()
+            return
+        if not bar.winfo_ismapped():
+            bar.pack(fill="x", padx=14, pady=(8, 0), before=self.tool_bar)
+        replaying = not self.show_podium
+        self.replay_toggle.config(text="🏆  Voir le podium" if replaying else "⟲  Revoir la course")
+        for widget in (self.replay_play, self.replay_scale, self.replay_label):
+            widget.pack_forget()
+        if replaying:
+            self.replay_scale.config(to=len(self.ctl.history) - 1)
+            self.replay_play.config(text="⏸" if self.replay_playing else "▶")
+            self.replay_play.pack(side="left", padx=(12, 6))
+            self.replay_scale.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            self.replay_label.pack(side="left")
+            self._sync_replay_bar()
 
     # ------------------------------------------------------------ écran de victoire
 
@@ -474,6 +607,7 @@ class App:
         if self.anim_job is not None:
             self.root.after_cancel(self.anim_job)
             self.anim_job = None
+        self._replay_stop()
         if self.deck_open:  # la fenêtre reprend sa largeur pour l'écran suivant
             try:
                 self.set_deck_open(False)
@@ -593,6 +727,7 @@ class App:
 
         self._show_hand()
         self._show_deck_panel()
+        self._show_replay_bar()
         self._update_action()
         self._flush_log()
 
@@ -624,16 +759,23 @@ class App:
                                                      jerseys=self.game.jerseys))
             return
         positions = self.anim.positions(time.monotonic() - self.anim_start) if self.anim is not None else None
+        replay = self._replay_active()
+        if replay:  # revoir la course : les coureurs là où ils étaient à ce moment de la course
+            positions = self._replay_positions()
         self._follow_camera()
         shapes = map_primitives(
             self.game,
-            self.focus_rider(),
+            None if replay else self.focus_rider(),
             positions=positions,
             view=self.view,
             proj=self._proj(),
         )
         self._paint(self.board, shapes)
-        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=self.game.riders,
+        riders = self.game.riders
+        if replay:  # le profil suit aussi la relecture : des copies des coureurs, placées à ce moment de la course
+            riders = [replace(r, position=int(round(positions[r][0])), lane=int(round(positions[r][1])))
+                      for r in self.game.riders if r in positions]
+        self._paint(self.profile, profile_primitives(self.game.track, BOARD_W, PROFILE_H, riders=riders,
                                                      weather=self.game.weather, tokens=self.game.tokens,
                                                      jerseys=self.game.jerseys))
         self._paint_weather_fx()

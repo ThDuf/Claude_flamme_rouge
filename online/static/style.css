@@ -74,6 +74,9 @@ canvas { display: block; width: 100%; height: auto; }
 .title { font-size: 20px; font-weight: 700; }
 /* la carte et le profil (1000 × 530) tiennent dans la hauteur de l'écran, avec la main en dessous à portée */
 .board { padding: 0; overflow: hidden; max-width: max(640px, calc((100vh - 330px) * 1000 / 530)); margin: 0 auto; }
+.replay { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
+.replay input[type=range] { flex: 1; accent-color: var(--accent); padding: 0; border: none; background: none; }
+.replay-label { font-weight: 700; white-space: nowrap; }
 .layer { position: relative; }
 #map-layer { cursor: grab; touch-action: none; }
 #map-layer.dragging { cursor: grabbing; }

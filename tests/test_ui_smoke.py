@@ -72,15 +72,23 @@ def test_menu_then_a_whole_game_then_back(root):
                 app.pick(rider, hand[0])  # on peut changer d'avis
                 assert app.picks[rider] is hand[0]
             app.validate()
-        for _ in range(3):
+        steps = 0
+        while app.ctl.phase not in (CHOOSE, FINISHED):  # mouvement, aspiration, fatigue (ou arrivée tout de suite)
             app.on_action()
             app.skip_animation()
+            steps += 1
+        assert steps == 3 or app.ctl.phase == FINISHED
         turns += 1
     assert app.ctl.phase == FINISHED
     assert app._podium_visible()  # écran de victoire à la place de la carte
     app._paint_map()
-    app.on_release(None)  # un clic : retour à la course
-    assert not app._podium_visible()
+    app.on_release(None)  # un clic : revoir la course, depuis le départ
+    assert not app._podium_visible() and app._replay_active() and app.replay_playing
+    assert app.replay_t == 0 and app.replay_scale.cget("to") == len(app.ctl.history) - 1
+    app._on_replay_scale(str(len(app.ctl.history) / 2))  # la barre de progression : on se place au milieu
+    assert not app.replay_playing and app.replay_t == len(app.ctl.history) / 2
+    middle = app._replay_positions()
+    assert set(middle) == set(app.game.riders) and middle != {r: (r.position, r.lane) for r in app.game.riders}
     app.on_release(None)  # un autre : de nouveau le podium
     assert app._podium_visible()
     app.on_release(None)

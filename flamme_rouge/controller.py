@@ -56,6 +56,9 @@ class TurnController:
         self.last_revealed_turn: Optional[int] = None
         self.phase = CHOOSE
         self.log: list[LogLine] = []
+        # pour revoir la course : les positions de tous les coureurs à chaque étape (départ, après chaque mouvement
+        # et chaque aspiration) : [(libellé, {coureur: (case, file)})]
+        self.history: list[tuple[str, dict]] = []
         self._drained = 0
         self.played: dict[Rider, Card] = {}
         self.index = 0  # coureur en train de choisir
@@ -67,6 +70,7 @@ class TurnController:
         self.bid_rider: Optional[Rider] = None
         self.bids: dict[Rider, list[Card]] = {}
         self.breakaway_winners: list[Rider] = []
+        self._snapshot("Départ")
         if breakaway and game.breakaway_squares():
             self._start_breakaway()
         else:
@@ -174,7 +178,16 @@ class TurnController:
 
     # ------------------------------------------------------------ choix des cartes
 
+    def _snapshot(self, label: str) -> None:
+        """Note les positions de tous les coureurs (pour revoir la course) ; rien si rien n'a bougé."""
+        riders = getattr(self.game, "all_riders", self.game.riders)
+        where = {r: (r.position, r.lane) for r in riders}
+        if self.history and self.history[-1][1] == where:
+            return
+        self.history.append((label, where))
+
     def _begin_turn(self) -> None:
+        self._snapshot(f"Tour {self.game.turn + 1} · départ")  # après une échappée, par exemple
         self.log.append(LogLine(f"TOUR {self.game.turn + 1}", heading=True))
         self.played = {}
         self.index = 0
@@ -305,6 +318,25 @@ class TurnController:
                 LogLine(f"{r.name} joue {describe(card)} : case {start[r]} → {r.position}{note}", r.team)
             )
         self.phase = SLIPSTREAM
+        self._snapshot(f"Tour {g.turn + 1} · mouvement")
+        # Course unique : dès qu'un coureur passe la ligne au mouvement, c'est l'arrivée (l'aspiration ne déplace
+        # jamais la tête de course, le vainqueur est donc connu) : pas d'aspiration ni de fatigue à cliquer.
+        # Grand Tour : on garde aspiration et fatigue (elles comptent pour les temps et les arrivées suivantes).
+        if not g.tour and any(r.position >= len(g.track) for r in g.riders):
+            g.check_finish()
+            g.turn += 1
+            self._announce_winner()
+
+    def _announce_winner(self) -> None:
+        """Course unique terminée : phase d'arrivée et vainqueur dans le journal."""
+        g = self.game
+        self.phase = FINISHED
+        w = g.winner
+        self.log.append(LogLine("ARRIVÉE", heading=True))
+        self.log.append(
+            LogLine(f"Victoire de l'équipe {w.team + 1} avec le {w.kind} {w.name} "
+                    f"(case {w.position}) au tour {g.turn} !", w.team)
+        )
 
     def _slipstream(self) -> None:
         g = self.game
@@ -317,6 +349,7 @@ class TurnController:
                 self.log.append(LogLine(f"{r.name} aspiré : case {before[r]} → {r.position} (+{gain})", r.team))
         else:
             self.log.append(LogLine("Personne n'est aspiré."))
+        self._snapshot(f"Tour {g.turn + 1} · aspiration")
         self.phase = EXHAUSTION
 
     def _exhaustion(self) -> None:
@@ -344,12 +377,6 @@ class TurnController:
             w = g.winner
             self.log.append(LogLine(f"Victoire d'étape : {w.name} (équipe {w.team + 1}) en {format_time(g.stage_time[w])}", w.team))
         elif g.finished:
-            self.phase = FINISHED
-            w = g.winner
-            self.log.append(LogLine("ARRIVÉE", heading=True))
-            self.log.append(
-                LogLine(f"Victoire de l'équipe {w.team + 1} avec le {w.kind} {w.name} "
-                        f"(case {w.position}) au tour {g.turn} !", w.team)
-            )
+            self._announce_winner()
         else:
             self._begin_turn()

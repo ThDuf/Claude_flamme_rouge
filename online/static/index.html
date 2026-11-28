@@ -104,6 +104,12 @@
       <button id="toggle-podium" class="hidden">Revoir la course</button>
       <button id="back-lobby" class="hidden">Revenir au salon</button>
     </div>
+    <!-- revoir la course : lecture / pause et barre de progression (à l'arrivée) -->
+    <div id="replay" class="replay hidden">
+      <button id="replay-play" title="Lecture / pause">▶</button>
+      <input type="range" id="replay-range" min="0" max="1" step="0.01" value="0" aria-label="Moment de la course">
+      <span id="replay-label" class="replay-label"></span>
+    </div>
     <div id="revealed" class="revealed"></div>
     <div class="race-bottom">
       <section class="card hand player-only">
