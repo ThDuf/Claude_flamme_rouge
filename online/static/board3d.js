@@ -24,7 +24,7 @@ const FOLLOW_DISTANCE = 7; // distance de la caméra au groupe suivi, en cases
 const RACE_VIEW_AHEAD = 5; // vue course : les 5 prochaines cases devant le premier coureur (boardview.RACE_VIEW_AHEAD)
 const MOVE_TIME = 0.6; // durée d'un changement de cadrage, en secondes
 const FIT_MARGIN = 0.92; // vue d'ensemble : le parcours occupe 92 % du cadre
-const RIDER_SCALE = 1.5; // les coureurs un peu plus grands que nature : on les voit de loin
+const RIDER_SCALE = 2.2; // les coureurs plus grands que nature : un vélo fait à peu près la longueur d'une case
 const DUST_BITS = 40;
 const SWEAT_DROPS = 6; // gouttes de sueur d'un coureur en montée
 const SWEAT = "#bfe3ff";
@@ -234,8 +234,8 @@ const parts = {
   crank: new THREE.BoxGeometry(CRANK, 0.008, 0.008),
   pedal: new THREE.BoxGeometry(0.03, 0.008, 0.03),
   drop: (() => { const g = new THREE.SphereGeometry(0.01, 8, 6); g.scale(1, 1.6, 1); return g; })(), // goutte allongée
-  shadow: new THREE.CircleGeometry(0.16, 20),
-  ring: new THREE.RingGeometry(0.2, 0.25, 28),
+  shadow: new THREE.CircleGeometry(0.24, 20), // ombre et anneaux au sol, à la taille des coureurs
+  ring: new THREE.RingGeometry(0.3, 0.37, 28),
   halo: new THREE.SphereGeometry(0.26, 20, 14),
   wake: (() => { const g = new THREE.ConeGeometry(0.17, 0.9, 18, 1, true); g.rotateZ(Math.PI / 2); g.translate(-0.55, 0.22, 0); return g; })(),
 };
@@ -1123,7 +1123,9 @@ export function createBoard3D(container, colors) {
 const PROFILE_DEPTH = 1.6; // profondeur de la bande (les files des coureurs sont dessus)
 const PROFILE_UNIT = 0.32; // hauteur d'une case de dénivelé (le profil reste lisible sans écraser le plat)
 const PROFILE_SOCLE = 0.8; // épaisseur sous le point le plus bas
-const PROFILE_VIEW = new THREE.Vector3(0.12, 0.38, 1); // la caméra : de face, un peu au-dessus et sur la droite
+const PROFILE_VIEW = new THREE.Vector3(0.12, 0.38, 1);
+const PROFILE_TITLE_PX = 16; // hauteur gardée en haut pour le titre
+const PROFILE_LABELS_PX = 26; // et, dessous, pour les étiquettes (groupes, cols, météo) au-dessus du relief // la caméra : de face, un peu au-dessus et sur la droite
 const WEATHER_ICON = { pluie: "🌧", soleil: "☀", arriere: "➜ vent +1", face: "⬅ vent −1", travers: "⬇ travers" };
 
 export function createProfile3D(container, colors) {
@@ -1142,6 +1144,7 @@ export function createProfile3D(container, colors) {
   scene.add(world);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -200, 200);
   let pxPerSquare = 10; // largeur d'une case à l'écran (pour éviter que les étiquettes se chevauchent)
+  let unitsPerPx = 0.1; // pour poser les étiquettes à quelques pixels au-dessus du relief
   scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
   const light = new THREE.DirectionalLight(0xffffff, 1.4);
   light.position.set(-20, 40, 30);
@@ -1156,8 +1159,8 @@ export function createProfile3D(container, colors) {
     return (heights[i] + (heights[j] - heights[i]) * f - low) * PROFILE_UNIT;
   };
 
-  // une étiquette à la hauteur `y` du profil, `lift` au-dessus : ce décalage garde sa taille quand le profil est
-  // aplati (draw le recalcule)
+  // une étiquette à la hauteur `y` du profil, `lift` pixels au-dessus (draw la replace à chaque image : le décalage
+  // reste le même à l'écran, quel que soit l'aplatissement du profil)
   function tag(text, cls, x, y, z = 0, lift = 0) {
     const div = document.createElement("div");
     div.className = cls;
@@ -1226,12 +1229,12 @@ export function createProfile3D(container, colors) {
       group.add(m);
     };
     if (data.start) post(data.start, yAt(data.start) - bottom + 0.8, 0.12);
-    post(n, yAt(n) - bottom + 1.8, 0.2);
-    group.add(tag("ARRIVÉE", "profile3d-finish", n, yAt(n), 0, 2.2));
+    post(n, yAt(n) - bottom + 1.2, 0.2);
+    group.add(tag("ARRIVÉE", "profile3d-finish", n, yAt(n), 0, 24));
     // les cols : un badge rouge au sommet
     for (const [, topSquare, category] of data.profile.climbs) {
       const x = Math.min(topSquare, n) - (topSquare >= n ? 2.5 : 0);
-      group.add(tag(category, "profile3d-badge", x, yAt(Math.min(topSquare, n)), -PROFILE_DEPTH / 2, 1.0));
+      group.add(tag(category, "profile3d-badge", x, yAt(Math.min(topSquare, n)), -PROFILE_DEPTH / 2, 12));
     }
     world.add(group);
     fit();
@@ -1246,7 +1249,7 @@ export function createProfile3D(container, colors) {
     camera.position.copy(center).add(PROFILE_VIEW.clone().normalize().multiplyScalar(50));
     camera.lookAt(center);
     camera.updateMatrixWorld();
-    const top = Math.max(...heights.map((v) => (v - low) * PROFILE_UNIT)) + 2.4; // de l'air pour les étiquettes
+    const top = Math.max(...heights.map((v) => (v - low) * PROFILE_UNIT)) + 0.6;
     const inv = camera.matrixWorldInverse, p = new THREE.Vector3();
     const extents = (squash) => { // le cadre du profil à l'écran, la hauteur aplatie de `squash`
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1260,14 +1263,18 @@ export function createProfile3D(container, colors) {
     // toute la largeur ; si le profil est trop haut pour la bande, on l'aplatit (comme le profil 2D)
     let e = extents(1);
     const scale = (e.maxX - e.minX) / w;
+    // en haut, une bande pour le titre « Profil : … » et une pour les étiquettes ; le relief prend le reste
+    const room = Math.max(h - PROFILE_TITLE_PX - PROFILE_LABELS_PX, h / 3);
     let squash = 1;
-    for (let i = 0; i < 4 && e.maxY - e.minY > h * scale; i++) {
-      squash *= (h * scale) / (e.maxY - e.minY);
+    for (let i = 0; i < 4 && e.maxY - e.minY > room * scale; i++) {
+      squash *= (room * scale) / (e.maxY - e.minY);
       e = extents(squash);
     }
     world.scale.y = squash;
     pxPerSquare = 1 / scale;
-    const { minX, maxX, minY, maxY } = e;
+    unitsPerPx = scale;
+    const { minX, maxX, minY } = e;
+    const maxY = e.maxY + (h - room) * scale; // le profil sous le titre
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     Object.assign(camera, { left: cx - (w * scale) / 2, right: cx + (w * scale) / 2,
                             top: cy + (h * scale) / 2, bottom: cy - (h * scale) / 2 });
@@ -1336,7 +1343,7 @@ export function createProfile3D(container, colors) {
       while (placed.some(([l, r, f]) => f === floor && mid - half < r && l < mid + half)) floor += 1;
       placed.push([mid - half, mid + half, floor]);
       const t2 = tag(text, "profile3d-group", mid, Math.max(yAt(front + 0.5), yAt(back + 0.5)), -PROFILE_DEPTH / 2,
-                     1.4 + floor * 1.1);
+                     14 + floor * 11);
       t2.element.style.color = colors.groups[name] || "#fff";
       groupTags.push(t2);
       world.add(t2);
@@ -1350,13 +1357,13 @@ export function createProfile3D(container, colors) {
         const a = Math.min(z.start, n), b = Math.min(z.end, n);
         if (a >= b) continue;
         const mid = (a + b) / 2;
-        weatherGroup.add(tag(WEATHER_ICON[z.effect] || "", "profile3d-weather", mid, yAt(mid), -PROFILE_DEPTH / 2, 1.9));
+        weatherGroup.add(tag(WEATHER_ICON[z.effect] || "", "profile3d-weather", mid, yAt(mid), -PROFILE_DEPTH / 2, 22));
       }
       world.add(weatherGroup);
       weatherKey = key;
     }
     world.traverse((o) => { // les étiquettes gardent leur écart au profil, même aplati
-      if (o.isCSS2DObject && o.userData.lift) o.position.y = o.userData.y + o.userData.lift / world.scale.y;
+      if (o.isCSS2DObject && o.userData.lift) o.position.y = o.userData.y + (o.userData.lift * unitsPerPx) / world.scale.y;
     });
     renderer.render(scene, camera);
     labels.render(scene, camera);

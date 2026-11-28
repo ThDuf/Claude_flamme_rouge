@@ -104,6 +104,7 @@ canvas { display: block; width: 100%; height: auto; }
 .cards button.fatigue { background: #94a3b8; border-color: #94a3b8; }
 .cards button:hover:not(:disabled) { background: #fff; border-color: var(--accent); transform: translateY(-3px); }
 .race-right { display: flex; flex-direction: column; gap: 10px; }
+.race-right #action { order: 2; } /* le bouton de l'étape suivante sous le journal : en bas à droite de l'écran */
 .log { height: 220px; overflow-y: auto; font-size: 13px; padding: 10px 14px; }
 .log .heading { font-weight: 700; margin-top: 6px; }
 
@@ -146,8 +147,7 @@ body.tv #host-settings, body.tv #start, body.tv #seats button, body.tv #seats se
 body.tv #lobby-error, body.tv #race-error { display: none !important; }
 body.tv .race-bottom { grid-template-columns: 1fr; }
 body.tv .board { max-width: max(640px, calc((100vh - 230px) * 1000 / 530)); }
-/* grand écran : le panneau du deck pousse la course au lieu de la recouvrir */
-@media (min-width: 1100px) { body.deck-open #race { margin-right: 320px; } }
+/* le panneau du deck s'ouvre par-dessus le journal, sans rétrécir la page */
 
 /* Grand Tour */
 .mode-switch { margin-bottom: 10px; }
@@ -241,7 +241,7 @@ a.room-chip { color: var(--text); text-decoration: none; }
   body:not(.tv) #race > .race-bottom { display: contents; }
   body:not(.tv) #race .hand { grid-area: hand; margin: 0; }
   body:not(.tv) #race .race-right { grid-area: right; }
-  body:not(.tv) #race .log { height: calc(100vh - 190px); min-height: 220px; }
+  body:not(.tv) #race .log { height: calc(100vh - 250px); min-height: 220px; } /* + le bouton dessous */
 }
 
 /* le profil en 3D (board3d.js, createProfile3D), par-dessus le profil 2D */
