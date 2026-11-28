@@ -193,6 +193,7 @@ const BB = [0, 0.1]; // le pédalier
 const CRANK = 0.045; // longueur d'une manivelle
 const THIGH = 0.12, SHIN = 0.125;
 const HANDS = [0.115, 0.235];
+const HEAD_OFFSET = [0.028, 0.05]; // le centre de la tête par rapport aux épaules
 const WHEEL_R = 0.085;
 const CADENCE = 2.2 * Math.PI * 2; // tours de pédalier par case parcourue (× 2π)
 const POSES = { // hanche et épaules, dans le repère du vélo
@@ -216,6 +217,18 @@ const parts = {
   head: new THREE.SphereGeometry(0.04, 14, 10),
   helmet: new THREE.SphereGeometry(0.048, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
   glasses: new THREE.BoxGeometry(0.018, 0.014, 0.07),
+  saddle: (() => { // une selle : large à l'arrière, fine au bec
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.035, -0.022);
+    shape.quadraticCurveTo(-0.045, 0, -0.035, 0.022);
+    shape.lineTo(0.02, 0.009);
+    shape.quadraticCurveTo(0.04, 0, 0.02, -0.009);
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.012, bevelEnabled: true, bevelSize: 0.004,
+                                                  bevelThickness: 0.004, bevelSegments: 2 });
+    g.rotateX(-Math.PI / 2); // à plat, le bec vers +x
+    return g;
+  })(),
   crank: new THREE.BoxGeometry(CRANK, 0.008, 0.008),
   pedal: new THREE.BoxGeometry(0.03, 0.008, 0.03),
   shadow: new THREE.CircleGeometry(0.16, 20),
@@ -257,9 +270,11 @@ class RiderView {
     this.teamColor = fill.clone();
 
     this.group = new THREE.Group(); // à la place du coureur sur la route, tourné vers l'arrivée
+    this.slope = new THREE.Group(); // penché comme la route : vélo, coureur, ombre et anneaux suivent la pente
+    this.group.add(this.slope);
     this.model = new THREE.Group(); // à l'échelle des coureurs
     this.model.scale.setScalar(RIDER_SCALE);
-    this.group.add(this.model);
+    this.slope.add(this.model);
     this.bike = new THREE.Group();
     this.body = new THREE.Group();
     this.model.add(this.bike, this.body);
@@ -286,6 +301,9 @@ class RiderView {
       stretch(t, a, b);
       this.bike.add(t);
     }
+    const saddle = new THREE.Mesh(parts.saddle, dark); // en haut de la tige de selle
+    saddle.position.set(-0.035, 0.232, 0);
+    this.bike.add(saddle);
     const bar = new THREE.Mesh(parts.tube, metal);
     stretch(bar, v(0.115, 0.24, -0.05), v(0.115, 0.24, 0.05));
     this.bike.add(bar);
@@ -311,11 +329,12 @@ class RiderView {
     this.head.add(new THREE.Mesh(parts.head, skin));
     const helmet = new THREE.Mesh(parts.helmet, team);
     helmet.position.y = 0.004;
-    helmet.scale.set(1.15, 0.9, 0.95);
+    helmet.scale.set(1.08, 0.85, 0.92);
     const glasses = new THREE.Mesh(parts.glasses, dark);
     glasses.position.set(0.036, 0.004, 0);
     this.head.add(helmet, glasses);
-    this.body.add(this.torso, this.band, this.head);
+    this.neck = new THREE.Mesh(parts.limb, skin);
+    this.body.add(this.torso, this.band, this.head, this.neck);
     this.arms = [-1, 1].map(() => { const m = new THREE.Mesh(parts.limb, team); this.body.add(m); return m; });
     this.legs = [-1, 1].map((side) => {
       const thigh = new THREE.Mesh(parts.limb, shorts), shin = new THREE.Mesh(parts.limb, skin);
@@ -330,11 +349,11 @@ class RiderView {
                                                                                 opacity: 0.25, depthWrite: false }));
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = LINE_LIFT * 2;
-    this.group.add(shadow);
+    this.slope.add(shadow);
     this.ring = new THREE.Mesh(parts.ring, new THREE.MeshBasicMaterial({ color: CURRENT_RING, side: THREE.DoubleSide }));
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = LINE_LIFT * 3;
-    this.group.add(this.ring);
+    this.slope.add(this.ring);
     const tag = document.createElement("div");
     tag.className = "rider3d";
     tag.textContent = r.name;
@@ -370,7 +389,7 @@ class RiderView {
       depthWrite: false, side: THREE.DoubleSide }));
     this.pulse.rotation.x = -Math.PI / 2;
     this.pulse.position.y = LINE_LIFT * 4;
-    this.group.add(this.pulse);
+    this.slope.add(this.pulse);
 
     this.crank = rnd(r.name.length + r.team) * Math.PI * 2;
     this.wheel = 0;
@@ -382,6 +401,8 @@ class RiderView {
     road.point(p, lane, this.group.position);
     const a = road.point(p - 0.25, lane), b = road.point(p + 0.25, lane);
     this.group.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+    // la pente de la route : le vélo monte le nez en l'air, descend le nez en bas (roues posées sur la route)
+    this.slope.rotation.z = Math.atan2(b.y - a.y, Math.hypot(b.x - a.x, b.z - a.z));
     const moved = this.last ? this.last.distanceTo(this.group.position) : 0;
     this.last = (this.last || new THREE.Vector3()).copy(this.group.position);
     const moving = moved > 1e-4 && !crashed;
@@ -439,9 +460,10 @@ class RiderView {
     this.band.position.copy(chest);
     this.band.quaternion.setFromUnitVectors(Z_AXIS, v(shoulder[0] - hip[0], shoulder[1] - hip[1]).normalize());
     this.band.scale.setScalar(this.torso.userData.width);
-    const neck = v(shoulder[0] - hip[0], shoulder[1] - hip[1]).normalize();
-    this.head.position.set(shoulder[0] + neck.x * 0.05 + 0.012, shoulder[1] + neck.y * 0.05 + 0.02, 0);
+    // la tête posée au bout du buste, un peu au-dessus (le regard vers la route devant), reliée par le cou
+    this.head.position.set(shoulder[0] + HEAD_OFFSET[0], shoulder[1] + HEAD_OFFSET[1], 0);
     this.head.rotation.z = -0.25;
+    stretch(this.neck, v(shoulder[0] - 0.01, shoulder[1] - 0.005), v(this.head.position.x - 0.01, this.head.position.y - 0.02), 0.9);
     this.arms.forEach((arm, i) => {
       const z = i ? 0.04 : -0.04;
       stretch(arm, v(shoulder[0], shoulder[1] - 0.01, z), v(HANDS[0], HANDS[1], z * 1.2), 0.85);
