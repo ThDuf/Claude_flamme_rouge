@@ -10,6 +10,7 @@
   --accent: #ff4d4f; /* couleur de l'équipe du joueur, posée par app.js (rouge par défaut) */
   --on-accent: #fff; /* texte lisible sur l'accent : foncé pour les équipes claires */
   --danger: #ff4d4f; /* les erreurs restent rouges, quelle que soit l'équipe */
+  --brand: #ff4d4f; /* l'en-tête (logo et trait) reste rouge, quelle que soit l'équipe */
   --good: #34d399;
 }
 * { box-sizing: border-box; }
@@ -26,9 +27,9 @@ h3 { margin: 18px 0 8px; font-size: 14px; color: var(--muted); text-transform: u
 .row.space { justify-content: space-between; gap: 12px; margin-top: 10px; }
 
 .top { display: flex; align-items: baseline; gap: 14px; padding: 12px 20px; background: var(--panel);
-       border-bottom: 3px solid var(--accent); }
+       border-bottom: 3px solid var(--brand); }
 .logo { font-weight: 800; font-size: 24px; letter-spacing: .02em; }
-.logo span { color: var(--accent); }
+.logo span { color: var(--brand); }
 .subtitle { color: var(--muted); }
 .room-chip { margin-left: auto; color: var(--muted); }
 .room-chip b { color: var(--text); letter-spacing: .15em; }
